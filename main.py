@@ -36,17 +36,16 @@ class Classifier(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, discriminator_hidden_sizes, activation):
+    def __init__(self, hidden_sizes, activation):
         super().__init__()
-        sizes = [19710] + list(discriminator_hidden_sizes)
-        in_size = 19710
+        sizes = [19710] + list(hidden_sizes)
         modules = []
         self.net = nn.Sequential(
-            [
-                nn.Sequential(nn.linear(in_size, out_size), activation)
-                for in_size, out_size in zip(sizes, sizes[1:-1])
+            *[
+                nn.Sequential(nn.Linear(in_size, out_size), activation)
+                for in_size, out_size in zip(sizes, sizes[1:])
             ],
-            nn.linear(sizes[-1], 1),
+            nn.Linear(sizes[-1], 1),
         )
 
     def forward(self, x):
@@ -192,7 +191,7 @@ def main(
     discriminator_epochs,
     discriminator_args,
     save_classifier,
-    load_classifier_path,
+    classifier_load_path,
     log_dir,
     log_interval,
 ):
@@ -228,21 +227,22 @@ def main(
         ConcatDataset([train_dataset, test_dataset]),
         batch_size=mixed_batch_size,
         shuffle=True,
-        **kwargs
+        **kwargs,
     )
     classifier = Classifier().to(device)
     discriminator = Discriminator(**discriminator_args).to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
-    if load_classifier_path:
-        classifier.load_state_dict(torch.load(load_classifier_path))
-        test(
-            classifier=classifier,
-            device=device,
-            test_loader=test_loader,
-            epoch=0,
-            writer=writer,
-        )
+    if classifier_load_path:
+        classifier.load_state_dict(torch.load(classifier_load_path))
+        for epoch in range(1, classifier_epochs + 1):
+            test(
+                classifier=classifier,
+                device=device,
+                test_loader=test_loader,
+                epoch=epoch,
+                writer=writer,
+            )
     else:
         for epoch in range(1, classifier_epochs + 1):
             train(
@@ -323,14 +323,14 @@ def cli():
     )
     discriminator_parser = parser.add_argument_group("discriminator_args")
     discriminator_parser.add_argument(
-        "--discriminator-hidden-sizes",
+        "--hidden-sizes",
         type=int,
         nargs="*",
-        default=[19710, 2 ** 13, 2 ** 11, 256],
+        default=[2 ** 12, 2 ** 10, 256],
         metavar="N",
     )
-    discriminator_activation.add_argument(
-        "--discriminator-activation", type=eval, default=nn.ReLU(), metavar="N"
+    discriminator_parser.add_argument(
+        "--activation", type=lambda s: eval(f"nn.{s}"), default=nn.ReLU(), metavar="N"
     )
     optimizer_parser = parser.add_argument_group("optimizer_args")
     optimizer_parser.add_argument(
@@ -368,7 +368,7 @@ def cli():
         default=False,
         help="For Saving the current classifier",
     )
-    parser.add_argument("--load-classifier-path")
+    parser.add_argument("--classifier-load-path")
     main(**hierarchical_parse_args(parser))
 
 
