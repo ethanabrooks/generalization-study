@@ -214,10 +214,7 @@ def main(
         target_transform=lambda t: (t, 1),
     )
     train_loader = DataLoader(
-        Subset(train_dataset, indices=[0, 1]),
-        batch_size=batch_size,
-        shuffle=True,
-        **kwargs
+        train_dataset, batch_size=batch_size, shuffle=True, **kwargs
     )
     test_loader = DataLoader(
         test_dataset, batch_size=test_batch_size, shuffle=True, **kwargs
