@@ -32,7 +32,7 @@ def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
     model.train()
     correct = 0
     total = 0
-    for batch_idx, (data, target) in enumerate(train_loader):
+    for batch_idx, (data, (target, _)) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # TODO: add noise
         optimizer.zero_grad()
@@ -62,7 +62,7 @@ def test(model, device, test_loader, epoch, writer):
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data, target in test_loader:
+        for data, (target, _) in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(
@@ -85,6 +85,75 @@ def is_correct(output, target):
         dim=1, keepdim=True
     )  # get the index of the max log-probability
     return pred.eq(target.view_as(pred)).sum().item()
+
+
+def main(
+    no_cuda,
+    seed,
+    batch_size,
+    test_batch_size,
+    optimizer_args,
+    epochs,
+    save_model,
+    log_dir,
+    log_interval,
+):
+    use_cuda = not no_cuda and torch.cuda.is_available()
+    torch.manual_seed(seed)
+    device = torch.device("cuda" if use_cuda else "cpu")
+    kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+    # TODO: use target transform to label train vs test.
+    train_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(
+            "../data",
+            train=True,
+            download=True,
+            transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            ),
+            target_transform=lambda t: (t, 0),
+        ),
+        batch_size=batch_size,
+        shuffle=True,
+        **kwargs
+    )
+    test_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(
+            "../data",
+            train=False,
+            transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            ),
+            target_transform=lambda t: (t, 1),
+        ),
+        batch_size=test_batch_size,
+        shuffle=True,
+        **kwargs
+    )
+    # TODO create mixed dataset with train/test labels
+    model = Net().to(device)
+    optimizer = optim.SGD(model.parameters(), **optimizer_args)
+    writer = SummaryWriter(str(log_dir))
+    for epoch in range(1, epochs + 1):
+        train(
+            model=model,
+            device=device,
+            train_loader=train_loader,
+            optimizer=optimizer,
+            epoch=epoch,
+            log_interval=log_interval,
+            writer=writer,
+        )
+        test(
+            model=model,
+            device=device,
+            test_loader=test_loader,
+            epoch=epoch,
+            writer=writer,
+        )
+    # TODO: train discriminator
+    if save_model:
+        torch.save(model.state_dict(), "mnist_cnn.pt")
 
 
 def cli():
@@ -148,75 +217,6 @@ def cli():
         help="For Saving the current Model",
     )
     main(**hierarchical_parse_args(parser))
-
-
-def main(
-    no_cuda,
-    seed,
-    batch_size,
-    test_batch_size,
-    optimizer_args,
-    epochs,
-    save_model,
-    log_dir,
-    log_interval,
-):
-    use_cuda = not no_cuda and torch.cuda.is_available()
-    torch.manual_seed(seed)
-    device = torch.device("cuda" if use_cuda else "cpu")
-    kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
-    # TODO: use target transform to label train vs test.
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            "../data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-            ),
-            # target_transform=lambda t: (t, 0),
-        ),
-        batch_size=batch_size,
-        shuffle=True,
-        **kwargs
-    )
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            "../data",
-            train=False,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-            ),
-            # target_transform=lambda t: (t, 1),
-        ),
-        batch_size=test_batch_size,
-        shuffle=True,
-        **kwargs
-    )
-    # TODO create mixed dataset with train/test labels
-    model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), **optimizer_args)
-    writer = SummaryWriter(str(log_dir))
-    for epoch in range(1, epochs + 1):
-        train(
-            model=model,
-            device=device,
-            train_loader=train_loader,
-            optimizer=optimizer,
-            epoch=epoch,
-            log_interval=log_interval,
-            writer=writer,
-        )
-        test(
-            model=model,
-            device=device,
-            test_loader=test_loader,
-            epoch=epoch,
-            writer=writer,
-        )
-    # TODO: train discriminator
-    if save_model:
-        torch.save(model.state_dict(), "mnist_cnn.pt")
 
 
 if __name__ == "__main__":
