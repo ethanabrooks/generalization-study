@@ -11,16 +11,6 @@ from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision import datasets, transforms
 
 
-class RandomNetwork(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(28 * 28, 28 * 28)
-
-    def forward(self, x):
-        with torch.no_grad():
-            return self.fc(x.reshape(-1, 28 * 28)).reshape(-1, 28, 28)
-
-
 class Classifier(nn.Module):
     def __init__(self):
         super(Classifier, self).__init__()
@@ -30,6 +20,7 @@ class Classifier(nn.Module):
         self.fc2 = nn.Linear(500, 10)
 
     def forward(self, x):
+        N = x.size(0)
         x1 = F.relu(self.conv1(x))
         x2 = F.max_pool2d(x1, 2, 2)
         x3 = F.relu(self.conv2(x2))
@@ -37,26 +28,36 @@ class Classifier(nn.Module):
         x5 = x4.view(-1, 4 * 4 * 50)
         x6 = F.relu(self.fc1(x5))
         x7 = self.fc2(x6)
-        activations = torch.cat([x.flatten() for x in [x1, x2, x3, x4, x5, x6, x7]])
+        activations = torch.cat(
+            [x.view(N, -1) for x in [x1, x2, x3, x4, x5, x6, x7]], dim=-1
+        )
         return F.log_softmax(x7, dim=1), activations
 
 
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4 * 4 * 50, 500)
-        self.fc2 = nn.Linear(500, 1)
+        self.fc1 = nn.Linear(19710, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, 1)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4 * 4 * 50)
         x = F.relu(self.fc1(x))
-        return self.fc2(x)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+class NoiseDataset(datasets.MNIST):
+    def __init__(self, *args, percent_noise=1, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.percent_noise = percent_noise
+        self.noise = torch.randn(self.data.shape)
+
+    def __getitem__(self, index):
+        x, y = super().__getitem__(index)
+        noise = self.noise[index]
+        x = noise * self.percent_noise + x * (1 - self.percent_noise)
+        return x, y
 
 
 def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
@@ -191,22 +192,17 @@ def main(
     torch.manual_seed(seed)
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
-    random_network = RandomNetwork()
 
-    train_dataset = datasets.MNIST(
+    train_dataset = NoiseDataset(
         "../data",
         train=True,
         download=True,
         transform=transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.1307,), (0.3081,)),
-                transforms.Lambda(random_network),
-            ]
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
         target_transform=lambda t: (t, 0),
     )
-    test_dataset = datasets.MNIST(
+    test_dataset = NoiseDataset(
         "../data",
         train=False,
         transform=transforms.Compose(
