@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from rl_utils import hierarchical_parse_args
 from torchvision import datasets, transforms
 
 
@@ -26,7 +27,7 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(model, device, train_loader, optimizer, epoch, log_interval):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -36,7 +37,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
-        if batch_idx % args.log_interval == 0:
+        if batch_idx % log_interval == 0:
             print(
                 "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
@@ -48,7 +49,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
             )
 
 
-def test(args, model, device, test_loader):
+def test(model, device, test_loader):
     model.eval()
     test_loss = 0
     correct = 0
@@ -76,7 +77,7 @@ def test(args, model, device, test_loader):
     )
 
 
-def main():
+def cli():
     # Training settings
     parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
     parser.add_argument(
@@ -134,13 +135,23 @@ def main():
         default=False,
         help="For Saving the current Model",
     )
-    args = parser.parse_args()
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
+    main(**hierarchical_parse_args(parser))
 
-    torch.manual_seed(args.seed)
 
+def main(
+    no_cuda,
+    seed,
+    batch_size,
+    test_batch_size,
+    lr,
+    momentum,
+    epochs,
+    save_model,
+    log_interval,
+):
+    use_cuda = not no_cuda and torch.cuda.is_available()
+    torch.manual_seed(seed)
     device = torch.device("cuda" if use_cuda else "cpu")
-
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     # TODO: use target transform to label train vs test.
     train_loader = torch.utils.data.DataLoader(
@@ -152,7 +163,7 @@ def main():
                 [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
             ),
         ),
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         shuffle=True,
         **kwargs
     )
@@ -164,23 +175,20 @@ def main():
                 [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
             ),
         ),
-        batch_size=args.test_batch_size,
+        batch_size=test_batch_size,
         shuffle=True,
         **kwargs
     )
     # TODO create mixed dataset with train/test labels
-
     model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-
-    for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(args, model, device, test_loader)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+    for epoch in range(1, epochs + 1):
+        train(model, device, train_loader, optimizer, epoch, log_interval)
+        test(model, device, test_loader)
     # TODO: train discriminator
-
-    if args.save_model:
+    if save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
 
 
 if __name__ == "__main__":
-    main()
+    cli()
