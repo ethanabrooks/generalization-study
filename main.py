@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision import datasets, transforms
 
 
@@ -194,14 +195,17 @@ def main(
         ),
         target_transform=lambda t: (t, 1),
     )
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, **kwargs
+    train_loader = DataLoader(
+        Subset(train_dataset, indices=[0, 1]),
+        batch_size=batch_size,
+        shuffle=True,
+        **kwargs
     )
-    test_loader = torch.utils.data.DataLoader(
+    test_loader = DataLoader(
         test_dataset, batch_size=test_batch_size, shuffle=True, **kwargs
     )
-    mixed_loader = torch.utils.data.DataLoader(
-        torch.utils.data.ConcatDataset([train_dataset, test_dataset]),
+    mixed_loader = DataLoader(
+        ConcatDataset([train_dataset, test_dataset]),
         batch_size=mixed_batch_size,
         shuffle=True,
         **kwargs
