@@ -209,7 +209,11 @@ def main(
         "../data",
         train=False,
         transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            [
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,)),
+                transforms.Lambda(random_network),
+            ]
         ),
         target_transform=lambda t: (t, 1),
     )
