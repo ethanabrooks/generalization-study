@@ -11,6 +11,9 @@ from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision import datasets, transforms
+import subprocess
+import csv
+from io import StringIO
 
 
 class Classifier(nn.Module):
@@ -72,10 +75,6 @@ def get_n_gpu():
         universal_newlines=True,
     )
     return len(list(csv.reader(StringIO(nvidia_smi)))) - 1
-
-
-def get_random_gpu():
-    return random.randrange(0, get_n_gpu())
 
 
 def get_freer_gpu():
@@ -225,11 +224,12 @@ def main(
     use_cuda = not no_cuda and torch.cuda.is_available()
     torch.manual_seed(seed)
     if use_cuda:
+        n_gpu = get_n_gpu()
         try:
             index = int(run_id[-1])
         except ValueError:
-            index = get_random_gpu()
-        device = torch.device("cuda", index=index)
+            index = random.randrange(0, n_gpu)
+        device = torch.device("cuda", index=index % n_gpu)
     else:
         device = "cpu"
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
