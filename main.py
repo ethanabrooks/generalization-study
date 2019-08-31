@@ -128,7 +128,7 @@ def train_discriminator(
         loss.backward()
         optimizer.step()
         correct += (
-            (torch.abs(discriminator_output.sigmoid() - discriminator_target) < 1e-3)
+            (torch.abs(discriminator_output.sigmoid() - discriminator_target) < 1e-4)
             .sum()
             .item()
         )
@@ -178,7 +178,11 @@ def main(
         train=True,
         download=True,
         transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            [
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,)),
+                transforms.Lambda(lambda x: torch.zeros_like(x)),
+            ]
         ),
         target_transform=lambda t: (t, 0),
     )
@@ -197,8 +201,7 @@ def main(
         test_dataset, batch_size=test_batch_size, shuffle=True, **kwargs
     )
     mixed_loader = torch.utils.data.DataLoader(
-        # torch.utils.data.ConcatDataset([train_dataset, test_dataset]),
-        test_dataset,
+        torch.utils.data.ConcatDataset([train_dataset, test_dataset]),
         batch_size=mixed_batch_size,
         shuffle=True,
         **kwargs
