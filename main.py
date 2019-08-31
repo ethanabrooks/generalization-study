@@ -140,7 +140,7 @@ def train_discriminator(
         # TODO: add noise
         optimizer.zero_grad()
         classifier_output, activations = classifier(data)
-        discriminator_output = discriminator(data)
+        discriminator_output = discriminator(activations)
         discriminator_target = discriminator_target.unsqueeze(1).float()
         loss = F.binary_cross_entropy_with_logits(
             discriminator_output, discriminator_target
