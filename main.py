@@ -158,7 +158,8 @@ def main(
     test_batch_size,
     mixed_batch_size,
     optimizer_args,
-    epochs,
+    classifier_epochs,
+    discriminator_epochs,
     save_classifier,
     log_dir,
     log_interval,
@@ -202,7 +203,7 @@ def main(
     discriminator = Discriminator().to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, classifier_epochs + 1):
         train(
             classifier=classifier,
             device=device,
@@ -219,7 +220,7 @@ def main(
             epoch=epoch,
             writer=writer,
         )
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, discriminator_epochs + 1):
         train_discriminator(
             classifier=classifier,
             discriminator=discriminator,
@@ -260,7 +261,14 @@ def cli():
         help="input batch size for testing (default: 1000)",
     )
     parser.add_argument(
-        "--epochs",
+        "--classifier-epochs",
+        type=int,
+        default=10,
+        metavar="N",
+        help="number of epochs to train (default: 10)",
+    )
+    parser.add_argument(
+        "--discriminator-epochs",
         type=int,
         default=10,
         metavar="N",
