@@ -209,6 +209,7 @@ def main(
     no_cuda,
     seed,
     batch_size,
+    percent_noise,
     test_batch_size,
     mixed_batch_size,
     optimizer_args,
@@ -242,6 +243,7 @@ def main(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
         target_transform=lambda t: (t, 0),
+        percent_noise=percent_noise,
     )
     test_dataset = NoiseDataset(
         "../data",
@@ -250,6 +252,7 @@ def main(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
         target_transform=lambda t: (t, 1),
+        percent_noise=percent_noise,
     )
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, **kwargs
@@ -326,6 +329,7 @@ def cli():
         metavar="N",
         help="input batch size for training (default: 64)",
     )
+    parser.add_argument("--percent-noise", type=float, required=True, metavar="N")
     parser.add_argument(
         "--test-batch-size",
         type=int,
