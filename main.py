@@ -121,12 +121,17 @@ def train_discriminator(
         optimizer.zero_grad()
         classifier_output = classifier(data)
         discriminator_output = discriminator(data)
+        discriminator_target = discriminator_target.unsqueeze(1).float()
         loss = F.binary_cross_entropy_with_logits(
-            discriminator_output, discriminator_target.unsqueeze(1).float()
+            discriminator_output, discriminator_target
         )
         loss.backward()
         optimizer.step()
-        correct += is_correct(discriminator_output, discriminator_target)
+        correct += (
+            (torch.abs(discriminator_output.sigmoid() - discriminator_target) < 1e-3)
+            .sum()
+            .item()
+        )
         total += discriminator_target.numel()
         if batch_idx % log_interval == 0:
             idx = epoch * len(mixed_loader) + batch_idx
