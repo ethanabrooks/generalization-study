@@ -37,14 +37,16 @@ class Classifier(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(19710, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(19710, 2 ** 13)
+        self.fc2 = nn.Linear(2 ** 13, 2 ** 11)
+        self.fc3 = nn.Linear(2 ** 11, 256)
+        self.fc4 = nn.Linear(156, 1)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        x = F.relu(self.fc3(x))
+        return self.fc4(x)
 
 
 class NoiseDataset(datasets.MNIST):
@@ -243,8 +245,16 @@ def main(
             epoch=epoch,
             writer=writer,
         )
+    if save_classifier:
+        torch.save(classifier.state_dict(), "mnist_cnn.pt")
+
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
-    for epoch in range(1, discriminator_epochs + 1):
+    iterator = (
+        range(1, discriminator_epochs + 1)
+        if discriminator_epochs
+        else itertools.count()
+    )
+    for epoch in iterator:
         train_discriminator(
             classifier=classifier,
             discriminator=discriminator,
@@ -255,9 +265,6 @@ def main(
             log_interval=log_interval,
             writer=writer,
         )
-
-    if save_classifier:
-        torch.save(classifier.state_dict(), "mnist_cnn.pt")
 
 
 def cli():
