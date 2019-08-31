@@ -1,0 +1,8 @@
+[main]
+root : /home/ethanbro/generalization-study/.runs
+db_path : /home/ethanbro/generalization-study/runs.db
+dir_names : logdir
+prefix : nice
+args : 
+	--log-dir=${main:root}/logdir/<path> 
+	--run-id=<path> 
