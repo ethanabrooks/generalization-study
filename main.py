@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from rl_utils import hierarchical_parse_args
+from tensorboardX import SummaryWriter
 from torchvision import datasets, transforms
 
 
@@ -27,7 +28,7 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-def train(model, device, train_loader, optimizer, epoch, log_interval):
+def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -38,6 +39,9 @@ def train(model, device, train_loader, optimizer, epoch, log_interval):
         loss.backward()
         optimizer.step()
         if batch_idx % log_interval == 0:
+            writer.add_scalar(
+                "loss", loss.item(), epoch * len(train_loader) + batch_idx
+            )
             print(
                 "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
@@ -101,7 +105,7 @@ def cli():
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
-    optimizer_parser = parser.add_argument_group('optimizer_args')
+    optimizer_parser = parser.add_argument_group("optimizer_args")
     optimizer_parser.add_argument(
         "--lr",
         type=float,
@@ -129,6 +133,7 @@ def cli():
         metavar="N",
         help="how many batches to wait before logging training status",
     )
+    parser.add_argument("--log-dir", default="/tmp/mnist", metavar="N")
 
     parser.add_argument(
         "--save-model",
@@ -147,6 +152,7 @@ def main(
     optimizer_args,
     epochs,
     save_model,
+    log_dir,
     log_interval,
 ):
     use_cuda = not no_cuda and torch.cuda.is_available()
@@ -182,8 +188,9 @@ def main(
     # TODO create mixed dataset with train/test labels
     model = Net().to(device)
     optimizer = optim.SGD(model.parameters(), **optimizer_args)
+    writer = SummaryWriter(str(log_dir))
     for epoch in range(1, epochs + 1):
-        train(model, device, train_loader, optimizer, epoch, log_interval)
+        train(model, device, train_loader, optimizer, epoch, log_interval, writer)
         test(model, device, test_loader)
     # TODO: train discriminator
     if save_model:
