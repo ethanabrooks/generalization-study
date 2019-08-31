@@ -30,6 +30,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
+        # TODO: add noise
         optimizer.zero_grad()
         output = model(data)
         loss = F.nll_loss(output, target)
@@ -141,6 +142,7 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+    # TODO: use target transform to label train vs test.
     train_loader = torch.utils.data.DataLoader(
         datasets.MNIST(
             "../data",
@@ -166,6 +168,7 @@ def main():
         shuffle=True,
         **kwargs
     )
+    # TODO create mixed dataset with train/test labels
 
     model = Net().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
@@ -173,6 +176,7 @@ def main():
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
         test(args, model, device, test_loader)
+    # TODO: train discriminator
 
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
