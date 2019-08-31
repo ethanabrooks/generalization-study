@@ -53,7 +53,7 @@ def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
             )
 
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, epoch, writer):
     model.eval()
     test_loss = 0
     correct = 0
@@ -70,13 +70,11 @@ def test(model, device, test_loader):
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
-
+    accuracy = correct / len(test_loader.dataset)
+    writer.add_scalar("accuracy", accuracy, epoch)
     print(
         "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            test_loss,
-            correct,
-            len(test_loader.dataset),
-            100.0 * correct / len(test_loader.dataset),
+            test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
         )
     )
 
@@ -190,8 +188,22 @@ def main(
     optimizer = optim.SGD(model.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
     for epoch in range(1, epochs + 1):
-        train(model, device, train_loader, optimizer, epoch, log_interval, writer)
-        test(model, device, test_loader)
+        train(
+            model=model,
+            device=device,
+            train_loader=train_loader,
+            optimizer=optimizer,
+            epoch=epoch,
+            log_interval=log_interval,
+            writer=writer,
+        )
+        test(
+            model=model,
+            device=device,
+            test_loader=test_loader,
+            epoch=epoch,
+            writer=writer,
+        )
     # TODO: train discriminator
     if save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
