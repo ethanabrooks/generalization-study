@@ -9,9 +9,9 @@ from tensorboardX import SummaryWriter
 from torchvision import datasets, transforms
 
 
-class Net(nn.Module):
+class Classifier(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super(Classifier, self).__init__()
         self.conv1 = nn.Conv2d(1, 20, 5, 1)
         self.conv2 = nn.Conv2d(20, 50, 5, 1)
         self.fc1 = nn.Linear(4 * 4 * 50, 500)
@@ -28,15 +28,34 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
-    model.train()
+class Discriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 20, 5, 1)
+        self.conv2 = nn.Conv2d(20, 50, 5, 1)
+        self.fc1 = nn.Linear(4 * 4 * 50, 500)
+        self.fc2 = nn.Linear(500, 1)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = x.view(-1, 4 * 4 * 50)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return torch.sigmoid(x)
+
+
+def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
+    classifier.train()
     correct = 0
     total = 0
     for batch_idx, (data, (target, _)) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # TODO: add noise
         optimizer.zero_grad()
-        output = model(data)
+        output = classifier(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
@@ -57,14 +76,14 @@ def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
             )
 
 
-def test(model, device, test_loader, epoch, writer):
-    model.eval()
+def test(classifier, device, test_loader, epoch, writer):
+    classifier.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
         for data, (target, _) in test_loader:
             data, target = data.to(device), target.to(device)
-            output = model(data)
+            output = classifier(data)
             test_loss += F.nll_loss(
                 output, target, reduction="sum"
             ).item()  # sum up batch loss
@@ -80,6 +99,51 @@ def test(model, device, test_loader, epoch, writer):
     )
 
 
+def train_discriminator(
+    classifier,
+    discriminator,
+    device,
+    mixed_loader,
+    optimizer,
+    epoch,
+    log_interval,
+    writer,
+):
+    classifier.eval()
+    correct = 0
+    total = 0
+    for batch_idx, (data, (classifier_target, discriminator_target)) in enumerate(
+        mixed_loader
+    ):
+        data = data.to(device)
+        classifier_target = classifier_target.to(device)
+        discriminator_target = discriminator_target.to(device)
+        # TODO: add noise
+        optimizer.zero_grad()
+        classifier_output = classifier(data)
+        discriminator_output = discriminator(data)
+        loss = F.binary_cross_entropy(
+            discriminator_output, discriminator_target.unsqueeze(1).float()
+        )
+        loss.backward()
+        optimizer.step()
+        correct += is_correct(discriminator_output, discriminator_target)
+        total += discriminator_target.numel()
+        if batch_idx % log_interval == 0:
+            idx = epoch * len(mixed_loader) + batch_idx
+            writer.add_scalar("disciminator loss", loss.item(), idx)
+            writer.add_scalar("discriminator accuracy", correct / total, idx)
+            print(
+                "Discriminator Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+                    epoch,
+                    batch_idx * len(data),
+                    len(mixed_loader.dataset),
+                    100.0 * batch_idx / len(mixed_loader),
+                    loss.item(),
+                )
+            )
+
+
 def is_correct(output, target):
     pred = output.argmax(
         dim=1, keepdim=True
@@ -92,9 +156,10 @@ def main(
     seed,
     batch_size,
     test_batch_size,
+    mixed_batch_size,
     optimizer_args,
     epochs,
-    save_model,
+    save_classifier,
     log_dir,
     log_interval,
 ):
@@ -103,40 +168,43 @@ def main(
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     # TODO: use target transform to label train vs test.
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            "../data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-            ),
-            target_transform=lambda t: (t, 0),
+    train_dataset = datasets.MNIST(
+        "../data",
+        train=True,
+        download=True,
+        transform=transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
-        batch_size=batch_size,
-        shuffle=True,
-        **kwargs
+        target_transform=lambda t: (t, 0),
+    )
+    test_dataset = datasets.MNIST(
+        "../data",
+        train=False,
+        transform=transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        ),
+        target_transform=lambda t: (t, 1),
+    )
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, **kwargs
     )
     test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            "../data",
-            train=False,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-            ),
-            target_transform=lambda t: (t, 1),
-        ),
-        batch_size=test_batch_size,
+        test_dataset, batch_size=test_batch_size, shuffle=True, **kwargs
+    )
+    mixed_loader = torch.utils.data.DataLoader(
+        # torch.utils.data.ConcatDataset([train_dataset, test_dataset]),
+        test_dataset,
+        batch_size=mixed_batch_size,
         shuffle=True,
         **kwargs
     )
-    # TODO create mixed dataset with train/test labels
-    model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), **optimizer_args)
+    classifier = Classifier().to(device)
+    discriminator = Discriminator().to(device)
+    optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
     for epoch in range(1, epochs + 1):
         train(
-            model=model,
+            classifier=classifier,
             device=device,
             train_loader=train_loader,
             optimizer=optimizer,
@@ -145,15 +213,26 @@ def main(
             writer=writer,
         )
         test(
-            model=model,
+            classifier=classifier,
             device=device,
             test_loader=test_loader,
             epoch=epoch,
             writer=writer,
         )
-    # TODO: train discriminator
-    if save_model:
-        torch.save(model.state_dict(), "mnist_cnn.pt")
+    for epoch in range(1, epochs + 1):
+        train_discriminator(
+            classifier=classifier,
+            discriminator=discriminator,
+            device=device,
+            mixed_loader=mixed_loader,
+            optimizer=optimizer,
+            epoch=epoch,
+            log_interval=log_interval,
+            writer=writer,
+        )
+
+    if save_classifier:
+        torch.save(classifier.state_dict(), "mnist_cnn.pt")
 
 
 def cli():
@@ -170,6 +249,13 @@ def cli():
         "--test-batch-size",
         type=int,
         default=1000,
+        metavar="N",
+        help="input batch size for testing (default: 1000)",
+    )
+    parser.add_argument(
+        "--mixed-batch-size",
+        type=int,
+        default=64,
         metavar="N",
         help="input batch size for testing (default: 1000)",
     )
@@ -211,10 +297,10 @@ def cli():
     parser.add_argument("--log-dir", default="/tmp/mnist", metavar="N")
 
     parser.add_argument(
-        "--save-model",
+        "--save-classifier",
         action="store_true",
         default=False,
-        help="For Saving the current Model",
+        help="For Saving the current classifier",
     )
     main(**hierarchical_parse_args(parser))
 
