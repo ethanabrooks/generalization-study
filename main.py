@@ -1,5 +1,6 @@
 from __future__ import print_function
 import time
+import itertools
 from pathlib import Path
 import argparse
 import torch
@@ -316,7 +317,6 @@ def cli():
     parser.add_argument(
         "--discriminator-epochs",
         type=int,
-        default=10,
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
