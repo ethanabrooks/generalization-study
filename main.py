@@ -187,6 +187,7 @@ def main(
     classifier_epochs,
     discriminator_epochs,
     save_classifier,
+    load_classifier_path,
     log_dir,
     log_interval,
 ):
@@ -228,25 +229,35 @@ def main(
     discriminator = Discriminator().to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
-    for epoch in range(1, classifier_epochs + 1):
-        train(
-            classifier=classifier,
-            device=device,
-            train_loader=train_loader,
-            optimizer=optimizer,
-            epoch=epoch,
-            log_interval=log_interval,
-            writer=writer,
-        )
+    if load_classifier_path:
+        classifier.load_state_dict(torch.load(load_classifier_path))
         test(
             classifier=classifier,
             device=device,
             test_loader=test_loader,
-            epoch=epoch,
+            epoch=0,
             writer=writer,
         )
-    if save_classifier:
-        torch.save(classifier.state_dict(), "mnist_cnn.pt")
+    else:
+        for epoch in range(1, classifier_epochs + 1):
+            train(
+                classifier=classifier,
+                device=device,
+                train_loader=train_loader,
+                optimizer=optimizer,
+                epoch=epoch,
+                log_interval=log_interval,
+                writer=writer,
+            )
+            test(
+                classifier=classifier,
+                device=device,
+                test_loader=test_loader,
+                epoch=epoch,
+                writer=writer,
+            )
+        if save_classifier:
+            torch.save(classifier.state_dict(), "mnist_cnn.pt")
 
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     iterator = (
@@ -341,6 +352,7 @@ def cli():
         default=False,
         help="For Saving the current classifier",
     )
+    parser.add_argument("--load-classifier-path")
     main(**hierarchical_parse_args(parser))
 
 
