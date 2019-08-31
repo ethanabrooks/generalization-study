@@ -216,7 +216,6 @@ def main(
     classifier_epochs,
     discriminator_epochs,
     discriminator_args,
-    save_classifier,
     classifier_load_path,
     log_dir,
     log_interval,
@@ -297,8 +296,7 @@ def main(
                 epoch=epoch,
                 writer=writer,
             )
-        if save_classifier:
-            torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
+        torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     iterator = (
@@ -398,13 +396,6 @@ def cli():
     )
     parser.add_argument("--log-dir", default="/tmp/mnist", metavar="N")
     parser.add_argument("--run-id", metavar="N", default="")
-
-    parser.add_argument(
-        "--save-classifier",
-        action="store_true",
-        default=False,
-        help="For Saving the current classifier",
-    )
     parser.add_argument("--classifier-load-path")
     main(**hierarchical_parse_args(parser))
 
