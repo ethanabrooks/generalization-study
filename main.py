@@ -1,5 +1,6 @@
 from __future__ import print_function
 import time
+from pathlib import Path
 import argparse
 import torch
 import torch.nn as nn
@@ -35,18 +36,21 @@ class Classifier(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self):
+    def __init__(self, discriminator_hidden_sizes, activation):
         super().__init__()
-        self.fc1 = nn.Linear(19710, 2 ** 13)
-        self.fc2 = nn.Linear(2 ** 13, 2 ** 11)
-        self.fc3 = nn.Linear(2 ** 11, 256)
-        self.fc4 = nn.Linear(156, 1)
+        sizes = [19710] + list(discriminator_hidden_sizes)
+        in_size = 19710
+        modules = []
+        self.net = nn.Sequential(
+            [
+                nn.Sequential(nn.linear(in_size, out_size), activation)
+                for in_size, out_size in zip(sizes, sizes[1:-1])
+            ],
+            nn.linear(sizes[-1], 1),
+        )
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        return self.fc4(x)
+        return self.net(x)
 
 
 class NoiseDataset(datasets.MNIST):
@@ -186,6 +190,7 @@ def main(
     optimizer_args,
     classifier_epochs,
     discriminator_epochs,
+    discriminator_args,
     save_classifier,
     load_classifier_path,
     log_dir,
@@ -226,7 +231,7 @@ def main(
         **kwargs
     )
     classifier = Classifier().to(device)
-    discriminator = Discriminator().to(device)
+    discriminator = Discriminator(**discriminator_args).to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
     if load_classifier_path:
@@ -257,7 +262,7 @@ def main(
                 writer=writer,
             )
         if save_classifier:
-            torch.save(classifier.state_dict(), "mnist_cnn.pt")
+            torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     iterator = (
@@ -315,6 +320,17 @@ def cli():
         default=10,
         metavar="N",
         help="number of epochs to train (default: 10)",
+    )
+    discriminator_parser = parser.add_argument_group("discriminator_args")
+    discriminator_parser.add_argument(
+        "--discriminator-hidden-sizes",
+        type=int,
+        nargs="*",
+        default=[19710, 2 ** 13, 2 ** 11, 256],
+        metavar="N",
+    )
+    discriminator_activation.add_argument(
+        "--discriminator-activation", type=eval, default=nn.ReLU(), metavar="N"
     )
     optimizer_parser = parser.add_argument_group("optimizer_args")
     optimizer_parser.add_argument(
