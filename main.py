@@ -30,14 +30,15 @@ class Classifier(nn.Module):
         self.fc2 = nn.Linear(500, 10)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4 * 4 * 50)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
+        x1 = F.relu(self.conv1(x))
+        x2 = F.max_pool2d(x1, 2, 2)
+        x3 = F.relu(self.conv2(x2))
+        x4 = F.max_pool2d(x3, 2, 2)
+        x5 = x4.view(-1, 4 * 4 * 50)
+        x6 = F.relu(self.fc1(x5))
+        x7 = self.fc2(x6)
+        activations = torch.cat([x.flatten() for x in [x1, x2, x3, x4, x5, x6, x7]])
+        return F.log_softmax(x7, dim=1), activations
 
 
 class Discriminator(nn.Module):
@@ -67,7 +68,7 @@ def train(classifier, device, train_loader, optimizer, epoch, log_interval, writ
         data, target = data.to(device), target.to(device)
         # TODO: add noise
         optimizer.zero_grad()
-        output = classifier(data)
+        output, activations = classifier(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
@@ -100,7 +101,7 @@ def test(classifier, device, test_loader, epoch, writer):
     with torch.no_grad():
         for data, (target, _) in test_loader:
             data, target = data.to(device), target.to(device)
-            output = classifier(data)
+            output, activations = classifier(data)
             test_loss += F.nll_loss(
                 output, target, reduction="sum"
             ).item()  # sum up batch loss
@@ -137,7 +138,7 @@ def train_discriminator(
         discriminator_target = discriminator_target.to(device)
         # TODO: add noise
         optimizer.zero_grad()
-        classifier_output = classifier(data)
+        classifier_output, activations = classifier(data)
         discriminator_output = discriminator(data)
         discriminator_target = discriminator_target.unsqueeze(1).float()
         loss = F.binary_cross_entropy_with_logits(
