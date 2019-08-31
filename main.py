@@ -43,8 +43,7 @@ class Discriminator(nn.Module):
         x = F.max_pool2d(x, 2, 2)
         x = x.view(-1, 4 * 4 * 50)
         x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return torch.sigmoid(x)
+        return self.fc2(x)
 
 
 def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
@@ -122,7 +121,7 @@ def train_discriminator(
         optimizer.zero_grad()
         classifier_output = classifier(data)
         discriminator_output = discriminator(data)
-        loss = F.binary_cross_entropy(
+        loss = F.binary_cross_entropy_with_logits(
             discriminator_output, discriminator_target.unsqueeze(1).float()
         )
         loss.backward()
@@ -220,6 +219,7 @@ def main(
             epoch=epoch,
             writer=writer,
         )
+    optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     for epoch in range(1, discriminator_epochs + 1):
         train_discriminator(
             classifier=classifier,
