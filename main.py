@@ -181,7 +181,7 @@ def main(
             [
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,)),
-                transforms.Lambda(lambda x: torch.zeros_like(x)),
+                transforms.Lambda(lambda x: torch.rand(x.shape)),
             ]
         ),
         target_transform=lambda t: (t, 0),
