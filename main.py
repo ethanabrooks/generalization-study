@@ -66,6 +66,31 @@ class NoiseDataset(datasets.MNIST):
         return x, y
 
 
+def get_n_gpu():
+    nvidia_smi = subprocess.check_output(
+        "nvidia-smi --format=csv --query-gpu=memory.free".split(),
+        universal_newlines=True,
+    )
+    return len(list(csv.reader(StringIO(nvidia_smi)))) - 1
+
+
+def get_random_gpu():
+    return random.randrange(0, get_n_gpu())
+
+
+def get_freer_gpu():
+    nvidia_smi = subprocess.check_output(
+        "nvidia-smi --format=csv --query-gpu=memory.free".split(),
+        universal_newlines=True,
+    )
+    free_memory = [
+        float(x[0].split()[0])
+        for i, x in enumerate(csv.reader(StringIO(nvidia_smi)))
+        if i > 0
+    ]
+    return int(np.argmax(free_memory))
+
+
 def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
     classifier.train()
     correct = 0
@@ -195,10 +220,18 @@ def main(
     classifier_load_path,
     log_dir,
     log_interval,
+    run_id,
 ):
     use_cuda = not no_cuda and torch.cuda.is_available()
     torch.manual_seed(seed)
-    device = torch.device("cuda" if use_cuda else "cpu")
+    if use_cuda:
+        try:
+            index = int(run_id[-1])
+        except ValueError:
+            index = get_random_gpu()
+        device = torch.device("cuda", index=index)
+    else:
+        device = "cpu"
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
     train_dataset = NoiseDataset(
@@ -360,6 +393,7 @@ def cli():
         help="how many batches to wait before logging training status",
     )
     parser.add_argument("--log-dir", default="/tmp/mnist", metavar="N")
+    parser.add_argument("--run-id", metavar="N", default="")
 
     parser.add_argument(
         "--save-classifier",
