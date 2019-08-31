@@ -1,4 +1,5 @@
 from __future__ import print_function
+import time
 import argparse
 import torch
 import torch.nn as nn
@@ -8,6 +9,16 @@ from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision import datasets, transforms
+
+
+class RandomNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(28 * 28, 28 * 28)
+
+    def forward(self, x):
+        with torch.no_grad():
+            return self.fc(x.reshape(-1, 28 * 28)).reshape(-1, 28, 28)
 
 
 class Classifier(nn.Module):
@@ -51,6 +62,7 @@ def train(classifier, device, train_loader, optimizer, epoch, log_interval, writ
     classifier.train()
     correct = 0
     total = 0
+    start = time.time()
     for batch_idx, (data, (target, _)) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # TODO: add noise
@@ -63,6 +75,11 @@ def train(classifier, device, train_loader, optimizer, epoch, log_interval, writ
         total += target.numel()
         if batch_idx % log_interval == 0:
             idx = epoch * len(train_loader) + batch_idx
+
+            tick = time.time()
+            writer.add_scalar("fps", (tick - start) / log_interval, idx)
+            start = tick
+
             writer.add_scalar("loss", loss.item(), idx)
             writer.add_scalar("train accuracy", correct / total, idx)
             print(
@@ -173,7 +190,8 @@ def main(
     torch.manual_seed(seed)
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
-    # TODO: use target transform to label train vs test.
+    random_network = RandomNetwork()
+
     train_dataset = datasets.MNIST(
         "../data",
         train=True,
@@ -182,7 +200,7 @@ def main(
             [
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,)),
-                transforms.Lambda(lambda x: torch.rand(x.shape)),
+                transforms.Lambda(random_network),
             ]
         ),
         target_transform=lambda t: (t, 0),
