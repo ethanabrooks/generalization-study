@@ -235,14 +235,13 @@ def main(
     writer = SummaryWriter(str(log_dir))
     if classifier_load_path:
         classifier.load_state_dict(torch.load(classifier_load_path))
-        for epoch in range(1, classifier_epochs + 1):
-            test(
-                classifier=classifier,
-                device=device,
-                test_loader=test_loader,
-                epoch=epoch,
-                writer=writer,
-            )
+        test(
+            classifier=classifier,
+            device=device,
+            test_loader=train_loader,
+            epoch=0,
+            writer=writer,
+        )
     else:
         for epoch in range(1, classifier_epochs + 1):
             train(
