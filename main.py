@@ -101,14 +101,15 @@ def cli():
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
-    parser.add_argument(
+    optimizer_parser = parser.add_argument_group('optimizer_args')
+    optimizer_parser.add_argument(
         "--lr",
         type=float,
         default=0.01,
         metavar="LR",
         help="learning rate (default: 0.01)",
     )
-    parser.add_argument(
+    optimizer_parser.add_argument(
         "--momentum",
         type=float,
         default=0.5,
@@ -143,8 +144,7 @@ def main(
     seed,
     batch_size,
     test_batch_size,
-    lr,
-    momentum,
+    optimizer_args,
     epochs,
     save_model,
     log_interval,
@@ -181,7 +181,7 @@ def main(
     )
     # TODO create mixed dataset with train/test labels
     model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+    optimizer = optim.SGD(model.parameters(), **optimizer_args)
     for epoch in range(1, epochs + 1):
         train(model, device, train_loader, optimizer, epoch, log_interval)
         test(model, device, test_loader)
