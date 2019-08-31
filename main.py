@@ -30,6 +30,8 @@ class Net(nn.Module):
 
 def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
     model.train()
+    correct = 0
+    total = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # TODO: add noise
@@ -38,10 +40,12 @@ def train(model, device, train_loader, optimizer, epoch, log_interval, writer):
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
+        correct += is_correct(output, target)
+        total += target.numel()
         if batch_idx % log_interval == 0:
-            writer.add_scalar(
-                "loss", loss.item(), epoch * len(train_loader) + batch_idx
-            )
+            idx = epoch * len(train_loader) + batch_idx
+            writer.add_scalar("loss", loss.item(), idx)
+            writer.add_scalar("train accuracy", correct / total, idx)
             print(
                 "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
@@ -64,10 +68,7 @@ def test(model, device, test_loader, epoch, writer):
             test_loss += F.nll_loss(
                 output, target, reduction="sum"
             ).item()  # sum up batch loss
-            pred = output.argmax(
-                dim=1, keepdim=True
-            )  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
+            correct += is_correct(output, target)
 
     test_loss /= len(test_loader.dataset)
     accuracy = correct / len(test_loader.dataset)
@@ -77,6 +78,13 @@ def test(model, device, test_loader, epoch, writer):
             test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
         )
     )
+
+
+def is_correct(output, target):
+    pred = output.argmax(
+        dim=1, keepdim=True
+    )  # get the index of the max log-probability
+    return pred.eq(target.view_as(pred)).sum().item()
 
 
 def cli():
@@ -166,6 +174,7 @@ def main(
             transform=transforms.Compose(
                 [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
             ),
+            # target_transform=lambda t: (t, 0),
         ),
         batch_size=batch_size,
         shuffle=True,
@@ -178,6 +187,7 @@ def main(
             transform=transforms.Compose(
                 [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
             ),
+            # target_transform=lambda t: (t, 1),
         ),
         batch_size=test_batch_size,
         shuffle=True,
