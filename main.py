@@ -292,13 +292,14 @@ def main(
     writer = SummaryWriter(str(log_dir))
     if classifier_load_path:
         classifier.load_state_dict(torch.load(classifier_load_path))
-        test(
-            classifier=classifier,
-            device=device,
-            test_loader=train_loader,
-            epoch=0,
-            writer=writer,
-        )
+        for epoch in range(1, classifier_epochs + 1):
+            test(
+                classifier=classifier,
+                device=device,
+                test_loader=train_loader,
+                epoch=epoch,
+                writer=writer,
+            )
         torch.manual_seed(seed)
     else:
         torch.manual_seed(seed)
