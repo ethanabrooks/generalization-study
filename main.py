@@ -168,12 +168,11 @@ def train_discriminator(
     ):
         data = data.to(device)
         classifier_target = classifier_target.to(device)
-        discriminator_target = discriminator_target.to(device)
+        discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
         # TODO: add noise
         optimizer.zero_grad()
         classifier_output, activations = classifier(data)
         discriminator_output = discriminator(activations)
-        discriminator_target = discriminator_target.unsqueeze(1).float()
         loss = F.binary_cross_entropy_with_logits(
             discriminator_output, discriminator_target
         )
@@ -187,8 +186,8 @@ def train_discriminator(
         total += discriminator_target.numel()
         if batch_idx % log_interval == 0:
             idx = epoch * len(train_loader) + batch_idx
-            writer.add_scalar("disciminator loss", loss.item(), idx)
-            writer.add_scalar("discriminator accuracy", correct / total, idx)
+            writer.add_scalar("disciminator train loss", loss.item(), idx)
+            writer.add_scalar("discriminator train accuracy", correct / total, idx)
             print(
                 "Discriminator Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
@@ -208,7 +207,7 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
         for data, (classifier_target, discriminator_target) in test_loader:
             data = data.to(device)
             classifier_target = classifier_target.to(device)
-            discriminator_target = discriminator_target.to(device)
+            discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
             classifier_output, activations = classifier(data)
             discriminator_output = discriminator(activations)
             test_loss += F.binary_cross_entropy_with_logits(
@@ -219,7 +218,7 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
 
     test_loss /= len(test_loader.dataset)
     accuracy = correct / len(test_loader.dataset)
-    writer.add_scalar("test accuracy", accuracy, epoch)
+    writer.add_scalar("discriminator test accuracy", accuracy, epoch)
     print(
         "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
             test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
