@@ -261,7 +261,7 @@ def main(
         device = torch.device("cuda", index=index % n_gpu)
     else:
         device = "cpu"
-    kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+    kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True} if use_cuda else {}
 
     train_dataset = NoiseDataset(
         "../data",
@@ -282,16 +282,8 @@ def main(
         target_transform=lambda t: (t, 1),
         percent_noise=percent_noise,
     )
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, **kwargs
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=test_batch_size,
-        shuffle=True,
-        pin_memory=True,
-        **kwargs,
-    )
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
     discriminator = Discriminator(**discriminator_args).to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
@@ -328,16 +320,8 @@ def main(
     train_dataset, test_dataset = random_split(
         train_dataset + test_dataset, [len(train_dataset), len(test_dataset)]
     )
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, **kwargs
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=test_batch_size,
-        shuffle=True,
-        pin_memory=True,
-        **kwargs,
-    )
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     iterator = (
         range(1, discriminator_epochs + 1)
