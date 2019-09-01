@@ -203,7 +203,8 @@ def train_discriminator(
 def test_discriminator(classifier, discriminator, device, test_loader, epoch, writer):
     classifier.eval()
     test_loss = 0
-    correct = 0
+    exactly_correct = 0
+    mostly_correct = 0
     with torch.no_grad():
         for data, (classifier_target, discriminator_target) in test_loader:
             data = data.to(device)
@@ -215,14 +216,22 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
                 discriminator_output, discriminator_target
             )
             error = torch.abs(discriminator_output.sigmoid() - discriminator_target)
-            correct += (error < 1e-4).sum().item()
+            exactly_correct += (error < 1e-4).sum().item()
+            mostly_correct += (error < 0.5).sum().item()
 
     test_loss /= len(test_loader.dataset)
-    accuracy = correct / len(test_loader.dataset)
-    writer.add_scalar("discriminator test accuracy", accuracy, epoch)
+    exact_accuracy = exactly_correct / len(test_loader.dataset)
+    approximate_accuracy = mostly_correct / len(test_loader.dataset)
+    writer.add_scalar("exact discriminator test accuracy", exact_accuracy, epoch)
+    writer.add_scalar(
+        "approximate discriminator test accuracy", approximate_accuracy, epoch
+    )
     print(
         "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
+            test_loss,
+            mostly_correct,
+            len(test_loader.dataset),
+            100.0 * approximate_accuracy,
         )
     )
 
