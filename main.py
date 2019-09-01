@@ -284,7 +284,6 @@ def main(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
-    discriminator = Discriminator(**discriminator_args).to(device)
     optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
     writer = SummaryWriter(str(log_dir))
     if classifier_load_path:
@@ -316,6 +315,7 @@ def main(
             )
         torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
+    discriminator = Discriminator(**discriminator_args).to(device)
     train_dataset, test_dataset = random_split(
         train_dataset + test_dataset, [len(train_dataset), len(test_dataset)]
     )
