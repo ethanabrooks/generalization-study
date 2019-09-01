@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from numpy import argmax
 from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
-from torch.utils.data import ConcatDataset, DataLoader, Subset
+from torch.utils.data import ConcatDataset, DataLoader, Subset, random_split
 from torchvision import datasets, transforms
 import subprocess
 import random
@@ -88,7 +89,7 @@ def get_freer_gpu():
         for i, x in enumerate(csv.reader(StringIO(nvidia_smi)))
         if i > 0
     ]
-    return int(np.argmax(free_memory))
+    return int(argmax(free_memory))
 
 
 def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
@@ -153,7 +154,7 @@ def train_discriminator(
     classifier,
     discriminator,
     device,
-    mixed_loader,
+    train_loader,
     optimizer,
     epoch,
     log_interval,
@@ -163,7 +164,7 @@ def train_discriminator(
     correct = 0
     total = 0
     for batch_idx, (data, (classifier_target, discriminator_target)) in enumerate(
-        mixed_loader
+        train_loader
     ):
         data = data.to(device)
         classifier_target = classifier_target.to(device)
@@ -185,18 +186,45 @@ def train_discriminator(
         )
         total += discriminator_target.numel()
         if batch_idx % log_interval == 0:
-            idx = epoch * len(mixed_loader) + batch_idx
+            idx = epoch * len(train_loader) + batch_idx
             writer.add_scalar("disciminator loss", loss.item(), idx)
             writer.add_scalar("discriminator accuracy", correct / total, idx)
             print(
                 "Discriminator Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
                     batch_idx * len(data),
-                    len(mixed_loader.dataset),
-                    100.0 * batch_idx / len(mixed_loader),
+                    len(train_loader.dataset),
+                    100.0 * batch_idx / len(train_loader),
                     loss.item(),
                 )
             )
+
+
+def test_discriminator(classifier, discriminator, device, test_loader, epoch, writer):
+    classifier.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, (classifier_target, discriminator_target) in test_loader:
+            data = data.to(device)
+            classifier_target = classifier_target.to(device)
+            discriminator_target = discriminator_target.to(device)
+            classifier_output, activations = classifier(data)
+            discriminator_output = discriminator(activations)
+            test_loss += F.binary_cross_entropy_with_logits(
+                discriminator_output, discriminator_target
+            )
+            error = torch.abs(discriminator_output.sigmoid() - discriminator_target)
+            correct += (error < 1e-4).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+    accuracy = correct / len(test_loader.dataset)
+    writer.add_scalar("test accuracy", accuracy, epoch)
+    print(
+        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
+        )
+    )
 
 
 def is_correct(output, target):
@@ -256,15 +284,13 @@ def main(
         percent_noise=percent_test_noise,
     )
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, **kwargs
+        train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, **kwargs
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=test_batch_size, shuffle=True, **kwargs
-    )
-    mixed_loader = DataLoader(
-        ConcatDataset([train_dataset, test_dataset]),
-        batch_size=mixed_batch_size,
+        test_dataset,
+        batch_size=test_batch_size,
         shuffle=True,
+        pin_memory=True,
         **kwargs,
     )
     classifier = Classifier().to(device)
@@ -300,6 +326,19 @@ def main(
             )
         torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
+    train_dataset, test_dataset = random_split(
+        train_dataset + test_dataset, [len(train_dataset), len(test_dataset)]
+    )
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, **kwargs
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=test_batch_size,
+        shuffle=True,
+        pin_memory=True,
+        **kwargs,
+    )
     optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
     iterator = (
         range(1, discriminator_epochs + 1)
@@ -311,10 +350,18 @@ def main(
             classifier=classifier,
             discriminator=discriminator,
             device=device,
-            mixed_loader=mixed_loader,
+            train_loader=train_loader,
             optimizer=optimizer,
             epoch=epoch,
             log_interval=log_interval,
+            writer=writer,
+        )
+        test_discriminator(
+            classifier=classifier,
+            discriminator=discriminator,
+            device=device,
+            test_loader=test_loader,
+            epoch=epoch,
             writer=writer,
         )
 
