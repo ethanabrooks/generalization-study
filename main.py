@@ -254,7 +254,7 @@ def main(
     run_id,
 ):
     use_cuda = not no_cuda and torch.cuda.is_available()
-    torch.manual_seed(seed)
+    torch.manual_seed(1)
     if use_cuda:
         n_gpu = get_n_gpu()
         try:
@@ -299,7 +299,9 @@ def main(
             epoch=0,
             writer=writer,
         )
+        torch.manual_seed(seed)
     else:
+        torch.manual_seed(seed)
         for epoch in range(1, classifier_epochs + 1):
             train(
                 classifier=classifier,
