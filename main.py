@@ -103,7 +103,7 @@ def train_discriminator(
         loss.backward()
         optimizer.step()
         correct += (
-            (torch.abs(discriminator_output.sigmoid() - discriminator_target) < 1e-4)
+            (discriminator_output.sigmoid().round() == discriminator_target)
             .sum()
             .item()
         )
@@ -139,7 +139,11 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
             )
             error = torch.abs(discriminator_output.sigmoid() - discriminator_target)
             total_error += error.mean()
-            correct += (error < 1e-4).sum().item()
+            correct += (
+                (discriminator_output.sigmoid().round() == discriminator_target)
+                .sum()
+                .item()
+            )
 
     N = len(test_loader.dataset)
     writer.add_scalar("discriminator test loss", test_loss / N, epoch)
