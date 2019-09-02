@@ -321,6 +321,7 @@ def cli():
     discriminator_parser.add_argument(
         "--activation", type=lambda s: eval(f"nn.{s}"), default=nn.ReLU(), metavar="N"
     )
+    discriminator_parser.add_argument("--dropout", action="store_true")
     optimizer_parser = parser.add_argument_group("optimizer_args")
     optimizer_parser.add_argument(
         "--lr",

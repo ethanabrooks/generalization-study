@@ -23,9 +23,11 @@ class Classifier(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, hidden_size, num_hidden, activation):
+    def __init__(self, hidden_size, num_hidden, activation, dropout):
         super().__init__()
-        self.activation = activation
+        self.activation = (
+            nn.Sequential(activation, nn.Dropout()) if dropout else activation
+        )
         self.conv1 = nn.Conv2d(20, 50, 5, 1)
         self.fc1 = nn.Linear(4 * 4 * 50, hidden_size)
         self.fc2 = nn.Linear(500, hidden_size)
