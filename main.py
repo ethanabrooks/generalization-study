@@ -1,8 +1,11 @@
 from __future__ import print_function
-import time
-import itertools
-from pathlib import Path
+
 import argparse
+import itertools
+import random
+from collections import namedtuple, Counter
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,153 +14,166 @@ from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
-import random
+from tqdm import tqdm
 
-from datasets import NoiseDataset, AddLabel
+from datasets import AddLabel, NoiseDataset
 from networks import Classifier, Discriminator
-from util import get_n_gpu, is_correct
+from util import get_n_gpu, is_correct, binary_is_correct
+
+Datasets = namedtuple("Datasets", "train test valid")
+Networks = namedtuple("Networks", "classifier discriminator")
 
 
-def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
+def train(
+    classifier, discriminator, alpha, device, train_loader, optimizer, log_interval
+):
     classifier.train()
-    correct = 0
-    total = 0
-    start = time.time()
-    for batch_idx, (data, (target, _)) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        # TODO: add noise
+    counter = Counter()
+    for batch_idx, (data, target) in tqdm(
+        enumerate(train_loader), total=len(train_loader), desc="classifier"
+    ):
+        data = data.to(device)
+        target = Networks(*[t.to(device) for t in target])
+        target = target._replace(
+            discriminator=target.discriminator.unsqueeze(1).float()
+        )
         optimizer.zero_grad()
-        output, *_ = classifier(data)
-        loss = F.nll_loss(output, target)
-        loss.backward()
+        classifier_output, *activations = classifier(data)
+        discriminator_output = discriminator(*activations)
+        loss = Networks(
+            classifier=F.nll_loss(classifier_output, target.classifier),
+            discriminator=F.binary_cross_entropy_with_logits(
+                discriminator_output, target.discriminator
+            ),
+        )
+        (loss.classifier - alpha * loss.discriminator).backward()
         optimizer.step()
-        correct += is_correct(output, target)
-        total += target.numel()
+        counter.update(
+            classifier_train_loss=loss.classifier.item(),
+            classifier_train_accuracy=is_correct(classifier_output, target.classifier),
+            discriminator_loss_on_classifier=loss.discriminator.item(),
+            discriminator_accuracy_on_classifier=binary_is_correct(
+                discriminator_output, target.discriminator
+            ),
+            batch=1,
+            total=len(data),
+        )
         if batch_idx % log_interval == 0:
-            idx = epoch * len(train_loader) + batch_idx
+            N = counter.pop("total")
+            yield {k: v if k == "batch" else v / N for k, v in counter.items()}
+            counter = Counter()
+    #     print(
+    #     "Train Batch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+    #         batch_idx,
+    #         batch_idx * len(data),
+    #         len(train_loader.dataset),
+    #         100.0 * batch_idx / len(train_loader),
+    #         loss.classifier.item(),
+    #         )
+    # )
 
-            tick = time.time()
-            writer.add_scalar("fps", (tick - start) / log_interval, idx)
-            start = tick
-
-            writer.add_scalar("loss", loss.item(), idx)
-            writer.add_scalar("train accuracy", correct / total, idx)
-            print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
-            )
-            correct = 0
-            total = 0
+    # correct += is_correct(output, target)
+    # total += target.numel()
+    # if batch_idx % log_interval == 0:
+    #     idx = i * len(train_loader) + batch_idx
+    #
+    #     tick = time.time()
+    #     writer.add_scalar("fps", (tick - start) / log_interval, idx)
+    #     start = tick
+    #
+    #     writer.add_scalar("loss", loss.item(), idx)
+    #     writer.add_scalar("train accuracy", correct / total, idx)
 
 
-def test(classifier, device, test_loader, epoch, writer):
+def test(classifier, device, test_loader):
     classifier.eval()
-    test_loss = 0
-    correct = 0
+    counter = Counter()
     with torch.no_grad():
         for data, (target, _) in test_loader:
             data, target = data.to(device), target.to(device)
             output, *_ = classifier(data)
-            test_loss += F.nll_loss(
-                output, target, reduction="sum"
-            ).item()  # sum up batch loss
-            correct += is_correct(output, target)
+            counter.update(
+                classifier_test_loss=F.nll_loss(output, target, reduction="sum").item(),
+                classifier_test_accuracy=is_correct(output, target),
+                total=target.numel(),
+            )  # sum up batch loss
 
-    test_loss /= len(test_loader.dataset)
-    accuracy = correct / len(test_loader.dataset)
-    writer.add_scalar("test accuracy", accuracy, epoch)
-    writer.add_scalar("test loss", test_loss, epoch)
+    N = counter.pop("total")
+    correct = counter["classifier_test_accuracy"]
     print(
         "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            test_loss, correct, len(test_loader.dataset), 100.0 * accuracy
+            counter["classifier_test_loss"] / N, correct, N, 100.0 * correct
         )
     )
+    return {k: v / N for k, v in counter.items() if k != "total"}
 
 
 def train_discriminator(
-    classifier,
-    discriminator,
-    device,
-    train_loader,
-    optimizer,
-    epoch,
-    log_interval,
-    writer,
+    classifier, discriminator, device, train_loader, optimizer, i, log_interval, writer
 ):
     classifier.eval()
-    correct = 0
-    total = 0
-    for batch_idx, (data, (_, discriminator_target)) in enumerate(train_loader):
+    counter = Counter()
+    for batch_idx, (data, (_, target)) in tqdm(
+        enumerate(train_loader), total=len(train_loader), desc="discriminator"
+    ):
         data = data.to(device)
-        discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
-        # TODO: add noise
+        target = target.to(device).unsqueeze(1).float()
         optimizer.zero_grad()
         classifier_output, *activations = classifier(data)
         discriminator_output = discriminator(*activations)
-        loss = F.binary_cross_entropy_with_logits(
-            discriminator_output, discriminator_target
-        )
+        loss = F.binary_cross_entropy_with_logits(discriminator_output, target)
         loss.backward()
         optimizer.step()
-        correct += (
-            (discriminator_output.sigmoid().round() == discriminator_target)
-            .sum()
-            .item()
+        counter.update(
+            discriminator_train_loss=loss.item(),
+            discriminator_train_accuracy=binary_is_correct(
+                discriminator_output, target
+            ),
+            total=len(data),
+            batch=1,
         )
-        total += discriminator_target.numel()
         if batch_idx % log_interval == 0:
-            idx = epoch * len(train_loader) + batch_idx
-            writer.add_scalar("disciminator train loss", loss.item(), idx)
-            writer.add_scalar("discriminator train accuracy", correct / total, idx)
-            print(
-                "Discriminator Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
-            )
-            correct = 0
-            total = 0
+            # print(
+            # "Discriminator Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+            # i,
+            # batch_idx * len(data),
+            # len(train_loader.dataset),
+            # 100.0 * batch_idx / len(train_loader),
+            # loss.item(),
+            # )
+            # )
+            N = counter.pop("total")
+            yield {k: v if k == "batch" else v / N for k, v in counter.items()}
+            counter = Counter()
 
 
-def test_discriminator(classifier, discriminator, device, test_loader, epoch, writer):
+def test_discriminator(classifier, discriminator, device, test_loader, i, writer):
     classifier.eval()
-    test_loss = 0
-    correct = 0
-    total_error = 0
+    counter = Counter()
     with torch.no_grad():
-        for data, (_, discriminator_target) in test_loader:
+        for data, (_, target) in test_loader:
             data = data.to(device)
-            discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
+            target = target.to(device).unsqueeze(1).float()
             classifier_output, *activations = classifier(data)
             discriminator_output = discriminator(*activations)
-            test_loss += F.binary_cross_entropy_with_logits(
-                discriminator_output, discriminator_target
+            logits = F.binary_cross_entropy_with_logits(discriminator_output, target)
+            counter.update(
+                discriminator_test_loss=logits.item(),
+                discriminator_test_accuracy=binary_is_correct(
+                    discriminator_output, target
+                ),
+                total=target.numel(),
             )
-            error = torch.abs(discriminator_output.sigmoid() - discriminator_target)
-            total_error += error.mean()
-            correct += (
-                (discriminator_output.sigmoid().round() == discriminator_target)
-                .sum()
-                .item()
-            )
-
-    N = len(test_loader.dataset)
-    writer.add_scalar("discriminator test loss", test_loss / N, epoch)
-    writer.add_scalar("discriminator test error", total_error / N, epoch)
-    writer.add_scalar("discriminator test accuracy", correct / N, epoch)
+    N = counter.pop("total")
     print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            test_loss / N, correct, N, 100.0 * correct / N
+        "\nTest set: average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            counter["discriminator_test_loss"] / N,
+            counter["discriminator_test_accuracy"],
+            N,
+            100.0 * counter["discriminator_test_accuracy"] / N,
         )
     )
+    return {k: v / N for k, v in counter.items()}
 
 
 def main(
@@ -166,15 +182,17 @@ def main(
     batch_size,
     percent_noise,
     random_labels,
-    test_batch_size,
-    optimizer_args,
+    classifier_optimizer_args,
     classifier_epochs,
+    discriminator_optimizer_args,
     discriminator_epochs,
     discriminator_args,
     classifier_load_path,
     log_dir,
     log_interval,
     run_id,
+    num_iterations,
+    alpha,
 ):
     use_cuda = not no_cuda and torch.cuda.is_available()
     torch.manual_seed(1)
@@ -206,80 +224,112 @@ def main(
         ),
         percent_noise=percent_noise,
     )
-    half = (len(train_dataset) + len(test_dataset)) // 2
-    train_dataset, test_dataset = random_split(
-        train_dataset + test_dataset, [half, half]
+    size = len(train_dataset) + len(test_dataset)
+    splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=size * 1 // 7)
+    classifier_datasets = Datasets(
+        *[
+            AddLabel(dataset, label, random_labels=random_labels)
+            for label, dataset in enumerate(
+                random_split(train_dataset + test_dataset, splits)
+            )
+        ]
     )
-    train_dataset = AddLabel(train_dataset, 0, random_labels=random_labels)
-    test_dataset = AddLabel(test_dataset, 1, random_labels=random_labels)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
+    classifier_loaders = Datasets(
+        *[
+            DataLoader(dataset, batch_size=batch_size, **kwargs)
+            for dataset in classifier_datasets
+        ]
+    )
+    discriminator_dataset = Datasets(
+        *random_split(
+            classifier_datasets.train + classifier_datasets.test,
+            [splits.train, splits.test],
+        ),
+        valid=None,
+    )
+    discriminator_loaders = Datasets(
+        train=DataLoader(discriminator_dataset.train, batch_size=batch_size, **kwargs),
+        test=DataLoader(discriminator_dataset.test, batch_size=batch_size, **kwargs),
+        valid=None,
+    )
     classifier = Classifier().to(device)
-    optimizer = optim.SGD(classifier.parameters(), **optimizer_args)
+    classifier_optimizer = optim.SGD(
+        classifier.parameters(),
+        **{
+            k.replace("classifier_", ""): v
+            for k, v in classifier_optimizer_args.items()
+        },
+    )
+    discriminator = Discriminator(**discriminator_args).to(device)
+    discriminator_optimizer = optim.SGD(
+        discriminator.parameters(),
+        **{
+            k.replace("discriminator_", ""): v
+            for k, v in discriminator_optimizer_args.items()
+        },
+    )
     writer = SummaryWriter(str(log_dir))
     if classifier_load_path:
         classifier.load_state_dict(torch.load(classifier_load_path))
-        for epoch in range(1, classifier_epochs + 1):
-            test(
-                classifier=classifier,
-                device=device,
-                test_loader=train_loader,
-                epoch=epoch,
-                writer=writer,
-            )
+        # sanity check to make sure that classifier was properly loaded
+        for k, v in test(
+            classifier=classifier, device=device, test_loader=classifier_loaders.train
+        ).items():
+            writer.add_scalar(k, v, 0)
         torch.manual_seed(seed)
     else:
         torch.manual_seed(seed)
-        for epoch in range(1, classifier_epochs + 1):
-            train(
-                classifier=classifier,
-                device=device,
-                train_loader=train_loader,
-                optimizer=optimizer,
-                epoch=epoch,
-                log_interval=log_interval,
-                writer=writer,
-            )
-            test(
-                classifier=classifier,
-                device=device,
-                test_loader=test_loader,
-                epoch=epoch,
-                writer=writer,
-            )
-        torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
+        iterations = range(num_iterations) if num_iterations else itertools.count()
+        batch_count = Counter()
 
-    discriminator = Discriminator(**discriminator_args).to(device)
-    train_dataset, test_dataset = random_split(
-        train_dataset + test_dataset, [half, half]
-    )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
-    optimizer = optim.SGD(discriminator.parameters(), **optimizer_args)
-    iterator = (
-        range(1, discriminator_epochs + 1)
-        if discriminator_epochs
-        else itertools.count()
-    )
-    for epoch in iterator:
-        test_discriminator(
-            classifier=classifier,
-            discriminator=discriminator,
-            device=device,
-            test_loader=test_loader,
-            epoch=epoch,
-            writer=writer,
-        )
-        train_discriminator(
-            classifier=classifier,
-            discriminator=discriminator,
-            device=device,
-            train_loader=train_loader,
-            optimizer=optimizer,
-            epoch=epoch,
-            log_interval=log_interval,
-            writer=writer,
-        )
+        for i in iterations:
+            for k, v in test(
+                classifier=classifier,
+                device=device,
+                test_loader=classifier_loaders.valid,
+            ).items():
+                writer.add_scalar(k, v, i)
+            for epoch in range(1, classifier_epochs + 1):
+                for counter in train(
+                    classifier=classifier,
+                    discriminator=discriminator,
+                    alpha=alpha if i > 0 else 0,
+                    device=device,
+                    train_loader=classifier_loaders.train,
+                    optimizer=classifier_optimizer,
+                    log_interval=log_interval,
+                ):
+                    batch_count.update(classifier=counter["batch"])
+                    for k, v in counter.items():
+                        if k != "batch":
+                            writer.add_scalar(k, v, batch_count["classifier"])
+            for k, v in test_discriminator(
+                classifier=classifier,
+                discriminator=discriminator,
+                device=device,
+                test_loader=discriminator_loaders.test,
+                i=i,
+                writer=writer,
+            ).items():
+                writer.add_scalar(k, v, i)
+            for epoch in range(1, discriminator_epochs + 1):
+                for j, counter in enumerate(
+                    train_discriminator(
+                        classifier=classifier,
+                        discriminator=discriminator,
+                        device=device,
+                        train_loader=discriminator_loaders.train,
+                        optimizer=discriminator_optimizer,
+                        i=i * discriminator_epochs + epoch,
+                        log_interval=log_interval,
+                        writer=writer,
+                    )
+                ):
+                    batch_count.update(discriminator=counter["batch"])
+                    for k, v in counter.items():
+                        if k != "batch":
+                            writer.add_scalar(k, v, batch_count["discriminator"])
+            torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
 
 def cli():
@@ -293,26 +343,22 @@ def cli():
         help="input batch size for training (default: 64)",
     )
     parser.add_argument("--percent-noise", type=float, required=True, metavar="N")
-    parser.add_argument(
-        "--test-batch-size",
-        type=int,
-        default=1000,
-        metavar="N",
-        help="input batch size for testing (default: 1000)",
-    )
+    parser.add_argument("--num-iterations", type=int, metavar="N")
     parser.add_argument(
         "--classifier-epochs",
         type=int,
-        default=10,
+        default=20,
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
     parser.add_argument(
         "--discriminator-epochs",
         type=int,
+        default=20,
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
+    parser.add_argument("--alpha", type=float, default=0.1, metavar="N")
     discriminator_parser = parser.add_argument_group("discriminator_args")
     discriminator_parser.add_argument(
         "--hidden-size", type=int, default=512, metavar="N"
@@ -322,16 +368,33 @@ def cli():
         "--activation", type=lambda s: eval(f"nn.{s}"), default=nn.ReLU(), metavar="N"
     )
     discriminator_parser.add_argument("--dropout", action="store_true")
-    optimizer_parser = parser.add_argument_group("optimizer_args")
-    optimizer_parser.add_argument(
-        "--lr",
+    classifier_optimizer_parser = parser.add_argument_group("classifier_optimizer_args")
+    classifier_optimizer_parser.add_argument(
+        "--classifier-lr",
         type=float,
         default=0.01,
         metavar="LR",
         help="learning rate (default: 0.01)",
     )
-    optimizer_parser.add_argument(
-        "--momentum",
+    classifier_optimizer_parser.add_argument(
+        "--classifier-momentum",
+        type=float,
+        default=0.5,
+        metavar="M",
+        help="SGD momentum (default: 0.5)",
+    )
+    discriminator_optimizer_parser = parser.add_argument_group(
+        "discriminator_optimizer_args"
+    )
+    discriminator_optimizer_parser.add_argument(
+        "--discriminator-lr",
+        type=float,
+        default=0.01,
+        metavar="LR",
+        help="learning rate (default: 0.01)",
+    )
+    discriminator_optimizer_parser.add_argument(
+        "--discriminator-momentum",
         type=float,
         default=0.5,
         metavar="M",

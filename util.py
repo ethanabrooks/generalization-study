@@ -31,3 +31,7 @@ def is_correct(output, target):
         dim=1, keepdim=True
     )  # get the index of the max log-probability
     return pred.eq(target.view_as(pred)).sum().item()
+
+
+def binary_is_correct(output, target):
+    return output.sigmoid().round().eq(target).sum().item()
