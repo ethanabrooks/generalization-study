@@ -285,6 +285,11 @@ def main(
         target_transform=lambda t: (t, 1),
         percent_noise=percent_noise,
     )
+    half = (len(train_dataset) + len(test_dataset)) // 2
+    train_dataset, test_dataset = random_split(
+        train_dataset + test_dataset, [half, half]
+    )
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
@@ -324,7 +329,7 @@ def main(
 
     discriminator = Discriminator(**discriminator_args).to(device)
     train_dataset, test_dataset = random_split(
-        train_dataset + test_dataset, [len(train_dataset), len(test_dataset)]
+        train_dataset + test_dataset, [half, half]
     )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
