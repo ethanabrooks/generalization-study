@@ -51,6 +51,8 @@ def train(classifier, device, train_loader, optimizer, epoch, log_interval, writ
                     loss.item(),
                 )
             )
+            correct = 0
+            total = 0
 
 
 def test(classifier, device, test_loader, epoch, writer):
@@ -121,6 +123,8 @@ def train_discriminator(
                     loss.item(),
                 )
             )
+            correct = 0
+            total = 0
 
 
 def test_discriminator(classifier, discriminator, device, test_loader, epoch, writer):
