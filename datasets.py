@@ -17,13 +17,22 @@ class NoiseDataset(datasets.MNIST):
 
 
 class AddLabel(Dataset):
-    def __init__(self, dataset, extra_label):
+    def __init__(self, dataset, extra_label, random_labels=False):
         self.label = extra_label
         self.dataset = dataset
+        self.random_labels = (
+            torch.randint(low=0, high=2, size=(len(dataset),))
+            if random_labels
+            else None
+        )
 
     def __getitem__(self, item):
         x, y = self.dataset[item]
-        return x, (y, self.label)
+        try:
+            label = self.random_labels[item]
+        except TypeError:
+            label = self.label
+        return x, (y, label)
 
     def __add__(self, other):
         return ConcatDataset([self, other])

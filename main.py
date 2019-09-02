@@ -157,6 +157,7 @@ def main(
     seed,
     batch_size,
     percent_noise,
+    random_labels,
     test_batch_size,
     optimizer_args,
     classifier_epochs,
@@ -201,8 +202,8 @@ def main(
     train_dataset, test_dataset = random_split(
         train_dataset + test_dataset, [half, half]
     )
-    train_dataset = AddLabel(train_dataset, 0)
-    test_dataset = AddLabel(test_dataset, 0)
+    train_dataset = AddLabel(train_dataset, 0, random_labels=random_labels)
+    test_dataset = AddLabel(test_dataset, 0, random_labels=random_labels)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
@@ -327,6 +328,7 @@ def cli():
         metavar="M",
         help="SGD momentum (default: 0.5)",
     )
+    parser.add_argument("--random-labels", action="store_true")
     parser.add_argument(
         "--no-cuda", action="store_true", default=False, help="disables CUDA training"
     )
