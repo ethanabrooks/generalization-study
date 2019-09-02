@@ -7,89 +7,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from numpy import argmax
 from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
-from torch.utils.data import ConcatDataset, DataLoader, Subset, random_split
-from torchvision import datasets, transforms
-import subprocess
+from torch.utils.data import DataLoader, random_split
+from torchvision import transforms
 import random
-import csv
-from io import StringIO
 
-
-class Classifier(nn.Module):
-    def __init__(self):
-        super(Classifier, self).__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4 * 4 * 50, 500)
-        self.fc2 = nn.Linear(500, 10)
-
-    def forward(self, x):
-        N = x.size(0)
-        x1 = F.relu(self.conv1(x))
-        x2 = F.max_pool2d(x1, 2, 2)
-        x3 = F.relu(self.conv2(x2))
-        x4 = F.max_pool2d(x3, 2, 2)
-        x5 = x4.view(-1, 4 * 4 * 50)
-        x6 = F.relu(self.fc1(x5))
-        x7 = self.fc2(x6)
-        activations = torch.cat(
-            [x.view(N, -1) for x in [x1, x2, x3, x4, x5, x6, x7]], dim=-1
-        )
-        return F.log_softmax(x7, dim=1), activations
-
-
-class Discriminator(nn.Module):
-    def __init__(self, hidden_sizes, activation):
-        super().__init__()
-        sizes = [19710] + list(hidden_sizes)
-        modules = []
-        self.net = nn.Sequential(
-            *[
-                nn.Sequential(nn.Linear(in_size, out_size), activation)
-                for in_size, out_size in zip(sizes, sizes[1:])
-            ],
-            nn.Linear(sizes[-1], 1),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class NoiseDataset(datasets.MNIST):
-    def __init__(self, *args, percent_noise=1, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.percent_noise = percent_noise
-        self.noise = torch.randn(self.data.shape)
-
-    def __getitem__(self, index):
-        x, y = super().__getitem__(index)
-        noise = self.noise[index]
-        x = noise * self.percent_noise + x * (1 - self.percent_noise)
-        return x, y
-
-
-def get_n_gpu():
-    nvidia_smi = subprocess.check_output(
-        "nvidia-smi --format=csv --query-gpu=memory.free".split(),
-        universal_newlines=True,
-    )
-    return len(list(csv.reader(StringIO(nvidia_smi)))) - 1
-
-
-def get_freer_gpu():
-    nvidia_smi = subprocess.check_output(
-        "nvidia-smi --format=csv --query-gpu=memory.free".split(),
-        universal_newlines=True,
-    )
-    free_memory = [
-        float(x[0].split()[0])
-        for i, x in enumerate(csv.reader(StringIO(nvidia_smi)))
-        if i > 0
-    ]
-    return int(argmax(free_memory))
+from datasets import NoiseDataset, AddLabel
+from networks import Classifier, Discriminator
+from util import get_n_gpu, is_correct
 
 
 def train(classifier, device, train_loader, optimizer, epoch, log_interval, writer):
@@ -230,20 +156,12 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
     )
 
 
-def is_correct(output, target):
-    pred = output.argmax(
-        dim=1, keepdim=True
-    )  # get the index of the max log-probability
-    return pred.eq(target.view_as(pred)).sum().item()
-
-
 def main(
     no_cuda,
     seed,
     batch_size,
     percent_noise,
     test_batch_size,
-    mixed_batch_size,
     optimizer_args,
     classifier_epochs,
     discriminator_epochs,
@@ -273,7 +191,6 @@ def main(
         transform=transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
-        target_transform=lambda t: (t, 0),
         percent_noise=percent_noise,
     )
     test_dataset = NoiseDataset(
@@ -282,14 +199,14 @@ def main(
         transform=transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         ),
-        target_transform=lambda t: (t, 1),
         percent_noise=percent_noise,
     )
     half = (len(train_dataset) + len(test_dataset)) // 2
     train_dataset, test_dataset = random_split(
         train_dataset + test_dataset, [half, half]
     )
-
+    train_dataset = AddLabel(train_dataset, 0)
+    test_dataset = AddLabel(test_dataset, 0)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
@@ -375,13 +292,6 @@ def cli():
         "--test-batch-size",
         type=int,
         default=1000,
-        metavar="N",
-        help="input batch size for testing (default: 1000)",
-    )
-    parser.add_argument(
-        "--mixed-batch-size",
-        type=int,
-        default=64,
         metavar="N",
         help="input batch size for testing (default: 1000)",
     )
