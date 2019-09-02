@@ -262,6 +262,14 @@ def main(
         else itertools.count()
     )
     for epoch in iterator:
+        test_discriminator(
+            classifier=classifier,
+            discriminator=discriminator,
+            device=device,
+            test_loader=test_loader,
+            epoch=epoch,
+            writer=writer,
+        )
         train_discriminator(
             classifier=classifier,
             discriminator=discriminator,
@@ -270,14 +278,6 @@ def main(
             optimizer=optimizer,
             epoch=epoch,
             log_interval=log_interval,
-            writer=writer,
-        )
-        test_discriminator(
-            classifier=classifier,
-            discriminator=discriminator,
-            device=device,
-            test_loader=test_loader,
-            epoch=epoch,
             writer=writer,
         )
 
