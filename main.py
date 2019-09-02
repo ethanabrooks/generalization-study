@@ -203,7 +203,7 @@ def main(
         train_dataset + test_dataset, [half, half]
     )
     train_dataset = AddLabel(train_dataset, 0, random_labels=random_labels)
-    test_dataset = AddLabel(test_dataset, 0, random_labels=random_labels)
+    test_dataset = AddLabel(test_dataset, 1, random_labels=random_labels)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, **kwargs)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, **kwargs)
     classifier = Classifier().to(device)
