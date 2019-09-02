@@ -27,7 +27,7 @@ def train(classifier, device, train_loader, optimizer, epoch, log_interval, writ
         data, target = data.to(device), target.to(device)
         # TODO: add noise
         optimizer.zero_grad()
-        output, activations = classifier(data)
+        output, *_ = classifier(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
@@ -60,7 +60,7 @@ def test(classifier, device, test_loader, epoch, writer):
     with torch.no_grad():
         for data, (target, _) in test_loader:
             data, target = data.to(device), target.to(device)
-            output, activations = classifier(data)
+            output, *_ = classifier(data)
             test_loss += F.nll_loss(
                 output, target, reduction="sum"
             ).item()  # sum up batch loss
@@ -90,16 +90,13 @@ def train_discriminator(
     classifier.eval()
     correct = 0
     total = 0
-    for batch_idx, (data, (classifier_target, discriminator_target)) in enumerate(
-        train_loader
-    ):
+    for batch_idx, (data, (_, discriminator_target)) in enumerate(train_loader):
         data = data.to(device)
-        classifier_target = classifier_target.to(device)
         discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
         # TODO: add noise
         optimizer.zero_grad()
-        classifier_output, activations = classifier(data)
-        discriminator_output = discriminator(activations)
+        classifier_output, *activations = classifier(data)
+        discriminator_output = discriminator(*activations)
         loss = F.binary_cross_entropy_with_logits(
             discriminator_output, discriminator_target
         )
@@ -132,12 +129,11 @@ def test_discriminator(classifier, discriminator, device, test_loader, epoch, wr
     correct = 0
     total_error = 0
     with torch.no_grad():
-        for data, (classifier_target, discriminator_target) in test_loader:
+        for data, (_, discriminator_target) in test_loader:
             data = data.to(device)
-            classifier_target = classifier_target.to(device)
             discriminator_target = discriminator_target.to(device).unsqueeze(1).float()
-            classifier_output, activations = classifier(data)
-            discriminator_output = discriminator(activations)
+            classifier_output, *activations = classifier(data)
+            discriminator_output = discriminator(*activations)
             test_loss += F.binary_cross_entropy_with_logits(
                 discriminator_output, discriminator_target
             )
@@ -310,12 +306,9 @@ def cli():
     )
     discriminator_parser = parser.add_argument_group("discriminator_args")
     discriminator_parser.add_argument(
-        "--hidden-sizes",
-        type=int,
-        nargs="*",
-        default=[2 ** 12, 2 ** 10, 256],
-        metavar="N",
+        "--hidden-size", type=int, default=512, metavar="N"
     )
+    discriminator_parser.add_argument("--num-hidden", type=int, default=1, metavar="N")
     discriminator_parser.add_argument(
         "--activation", type=lambda s: eval(f"nn.{s}"), default=nn.ReLU(), metavar="N"
     )

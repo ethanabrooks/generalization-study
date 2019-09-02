@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset
 from torchvision import datasets
 
 
@@ -26,7 +26,7 @@ class AddLabel(Dataset):
         return x, (y, self.label)
 
     def __add__(self, other):
-        return self.dataset + other
+        return ConcatDataset([self, other])
 
     def __len__(self):
         return len(self.dataset)
