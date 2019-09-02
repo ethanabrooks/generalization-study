@@ -29,9 +29,7 @@ def train(
 ):
     classifier.train()
     counter = Counter()
-    for batch_idx, (data, target) in tqdm(
-        enumerate(train_loader), total=len(train_loader), desc="classifier"
-    ):
+    for batch_idx, (data, target) in enumerate(train_loader):
         data = data.to(device)
         target = Networks(*[t.to(device) for t in target])
         target = target._replace(
@@ -113,9 +111,7 @@ def train_discriminator(
 ):
     classifier.eval()
     counter = Counter()
-    for batch_idx, (data, (_, target)) in tqdm(
-        enumerate(train_loader), total=len(train_loader), desc="discriminator"
-    ):
+    for batch_idx, (data, (_, target)) in enumerate(train_loader):
         data = data.to(device)
         target = target.to(device).unsqueeze(1).float()
         optimizer.zero_grad()
@@ -289,7 +285,7 @@ def main(
                 test_loader=classifier_loaders.valid,
             ).items():
                 writer.add_scalar(k, v, i)
-            for epoch in range(1, classifier_epochs + 1):
+            for epoch in tqdm(range(1, classifier_epochs + 1), desc="classifier"):
                 for counter in train(
                     classifier=classifier,
                     discriminator=discriminator,
@@ -312,7 +308,7 @@ def main(
                 writer=writer,
             ).items():
                 writer.add_scalar(k, v, i)
-            for epoch in range(1, discriminator_epochs + 1):
+            for epoch in tqdm(range(1, discriminator_epochs + 1), desc="discriminator"):
                 for j, counter in enumerate(
                     train_discriminator(
                         classifier=classifier,
