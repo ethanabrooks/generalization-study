@@ -107,13 +107,13 @@ def test(classifier, device, test_loader):
 
 
 def train_discriminator(
-    classifier, discriminator, device, train_loader, optimizer, log_interval, tqdm
+    classifier, discriminator, device, train_loader, optimizer, log_interval, use_pbar
 ):
     classifier.eval()
     counter = Counter()
     iterator = enumerate(train_loader)
-    if tqdm:
-        iterator = tqdm(iterator)
+    if use_pbar:
+        iterator = tqdm(iterator, total=len(train_loader), desc="train discriminator")
     for batch_idx, (data, (_, target)) in iterator:
         data = data.to(device)
         target = target.to(device).unsqueeze(1).float()
@@ -331,7 +331,7 @@ def main(
                         train_loader=discriminator_loaders.train,
                         optimizer=discriminator_optimizer,
                         log_interval=log_interval,
-                        tqdm=discriminator_epochs is None,
+                        use_pbar=discriminator_epochs is None,
                     )
                 ):
                     batch_count.update(discriminator=counter["batch"])
