@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
 from tqdm import tqdm
 
-from datasets import AddLabel, NoiseDataset
+from datasets import AddLabel, NoiseDataset, SimpleDataset
 from networks import Classifier, Discriminator
 from util import get_n_gpu, is_correct, binary_is_correct
 
@@ -25,7 +25,7 @@ Networks = namedtuple("Networks", "classifier discriminator")
 
 
 def train(
-    classifier, discriminator, alpha, device, train_loader, optimizer, log_interval
+    classifier, discriminator, aux_coef, device, train_loader, optimizer, log_interval
 ):
     classifier.train()
     counter = Counter()
@@ -44,7 +44,7 @@ def train(
                 discriminator_output, target.discriminator
             ),
         )
-        (loss.classifier - alpha * loss.discriminator).backward()
+        (loss.classifier - aux_coef * loss.discriminator).backward()
         optimizer.step()
         counter.update(
             classifier_train_loss=loss.classifier.item(),
@@ -99,19 +99,22 @@ def test(classifier, device, test_loader):
     N = counter.pop("total")
     correct = counter["classifier_test_accuracy"]
     print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            counter["classifier_test_loss"] / N, correct, N, 100.0 * correct
+        "\nClassifier test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            counter["classifier_test_loss"] / N, correct, N, 100.0 * correct / N
         )
     )
     return {k: v / N for k, v in counter.items() if k != "total"}
 
 
 def train_discriminator(
-    classifier, discriminator, device, train_loader, optimizer, i, log_interval, writer
+    classifier, discriminator, device, train_loader, optimizer, log_interval, tqdm
 ):
     classifier.eval()
     counter = Counter()
-    for batch_idx, (data, (_, target)) in enumerate(train_loader):
+    iterator = enumerate(train_loader)
+    if tqdm:
+        iterator = tqdm(iterator)
+    for batch_idx, (data, (_, target)) in iterator:
         data = data.to(device)
         target = target.to(device).unsqueeze(1).float()
         optimizer.zero_grad()
@@ -143,7 +146,7 @@ def train_discriminator(
             counter = Counter()
 
 
-def test_discriminator(classifier, discriminator, device, test_loader, i, writer):
+def test_discriminator(classifier, discriminator, device, test_loader):
     classifier.eval()
     counter = Counter()
     with torch.no_grad():
@@ -162,7 +165,7 @@ def test_discriminator(classifier, discriminator, device, test_loader, i, writer
             )
     N = counter.pop("total")
     print(
-        "\nTest set: average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        "\nDiscriminator test set: average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
             counter["discriminator_test_loss"] / N,
             counter["discriminator_test_accuracy"],
             N,
@@ -176,7 +179,7 @@ def main(
     no_cuda,
     seed,
     batch_size,
-    percent_noise,
+    alpha,
     random_labels,
     classifier_optimizer_args,
     classifier_epochs,
@@ -188,7 +191,8 @@ def main(
     log_interval,
     run_id,
     num_iterations,
-    alpha,
+    aux_coef,
+    simple_dataset_size,
 ):
     use_cuda = not no_cuda and torch.cuda.is_available()
     torch.manual_seed(1)
@@ -203,23 +207,28 @@ def main(
         device = "cpu"
     kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True} if use_cuda else {}
 
-    train_dataset = NoiseDataset(
-        "../data",
-        train=True,
-        download=True,
-        transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-        ),
-        percent_noise=percent_noise,
-    )
-    test_dataset = NoiseDataset(
-        "../data",
-        train=False,
-        transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-        ),
-        percent_noise=percent_noise,
-    )
+    if simple_dataset_size is None:
+        train_dataset = NoiseDataset(
+            "../data",
+            train=True,
+            download=True,
+            transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            ),
+            percent_noise=alpha,
+        )
+        test_dataset = NoiseDataset(
+            "../data",
+            train=False,
+            transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            ),
+            percent_noise=alpha,
+        )
+    else:
+        dataset = SimpleDataset(n=simple_dataset_size, generalization_error=alpha)
+        half = simple_dataset_size // 2
+        train_dataset, test_dataset = random_split(dataset, [half, half])
     size = len(train_dataset) + len(test_dataset)
     splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=size * 1 // 7)
     classifier_datasets = Datasets(
@@ -248,7 +257,7 @@ def main(
         test=DataLoader(discriminator_dataset.test, batch_size=batch_size, **kwargs),
         valid=None,
     )
-    classifier = Classifier().to(device)
+    classifier = Classifier(n=simple_dataset_size).to(device)
     classifier_optimizer = optim.SGD(
         classifier.parameters(),
         **{
@@ -256,7 +265,9 @@ def main(
             for k, v in classifier_optimizer_args.items()
         },
     )
-    discriminator = Discriminator(**discriminator_args).to(device)
+    discriminator = Discriminator(n=simple_dataset_size, **discriminator_args).to(
+        device
+    )
     discriminator_optimizer = optim.SGD(
         discriminator.parameters(),
         **{
@@ -289,7 +300,7 @@ def main(
                 for counter in train(
                     classifier=classifier,
                     discriminator=discriminator,
-                    alpha=alpha if i > 0 else 0,
+                    aux_coef=aux_coef if i > 0 else 0,
                     device=device,
                     train_loader=classifier_loaders.train,
                     optimizer=classifier_optimizer,
@@ -304,11 +315,14 @@ def main(
                 discriminator=discriminator,
                 device=device,
                 test_loader=discriminator_loaders.test,
-                i=i,
-                writer=writer,
             ).items():
                 writer.add_scalar(k, v, i)
-            for epoch in tqdm(range(1, discriminator_epochs + 1), desc="discriminator"):
+            iterator = (
+                tqdm(range(1, discriminator_epochs + 1), desc="discriminator")
+                if discriminator_epochs
+                else itertools.count()
+            )
+            for epoch in iterator:
                 for j, counter in enumerate(
                     train_discriminator(
                         classifier=classifier,
@@ -316,9 +330,8 @@ def main(
                         device=device,
                         train_loader=discriminator_loaders.train,
                         optimizer=discriminator_optimizer,
-                        i=i * discriminator_epochs + epoch,
                         log_interval=log_interval,
-                        writer=writer,
+                        tqdm=discriminator_epochs is None,
                     )
                 ):
                     batch_count.update(discriminator=counter["batch"])
@@ -338,7 +351,8 @@ def cli():
         metavar="N",
         help="input batch size for training (default: 64)",
     )
-    parser.add_argument("--percent-noise", type=float, required=True, metavar="N")
+    parser.add_argument("--alpha", type=float, metavar="N", required=True)
+    parser.add_argument("--simple-dataset-size", type=int, metavar="N")
     parser.add_argument("--num-iterations", type=int, metavar="N")
     parser.add_argument(
         "--classifier-epochs",
@@ -354,7 +368,7 @@ def cli():
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
-    parser.add_argument("--alpha", type=float, default=0.1, metavar="N")
+    parser.add_argument("--aux-coef", type=float, default=0.1, metavar="N")
     discriminator_parser = parser.add_argument_group("discriminator_args")
     discriminator_parser.add_argument(
         "--hidden-size", type=int, default=512, metavar="N"
@@ -363,7 +377,6 @@ def cli():
     discriminator_parser.add_argument(
         "--activation", type=lambda s: eval(f"nn.{s}"), default=nn.ReLU(), metavar="N"
     )
-    discriminator_parser.add_argument("--dropout", action="store_true")
     classifier_optimizer_parser = parser.add_argument_group("classifier_optimizer_args")
     classifier_optimizer_parser.add_argument(
         "--classifier-lr",

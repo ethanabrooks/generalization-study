@@ -34,8 +34,26 @@ class AddLabel(Dataset):
             label = self.label
         return x, (y, label)
 
-    def __add__(self, other):
-        return ConcatDataset([self, other])
-
     def __len__(self):
         return len(self.dataset)
+
+
+class SimpleDataset(Dataset):
+    def __init__(self, n: int, generalization_error: float):
+        self.targets = torch.randint(low=0, high=2, size=(n,))
+        generalization_errors = torch.bernoulli(
+            generalization_error * torch.ones(n).float()
+        )
+        self.generalization_bits = torch.abs(
+            self.targets.float() - generalization_errors
+        ).unsqueeze(1)
+        self.one_hots = torch.eye(n).float()
+
+    def __getitem__(self, item):
+        target = self.targets[item]
+        generalization_bit = self.generalization_bits[item]
+        unique_code = self.one_hots[item]
+        return torch.cat([generalization_bit, unique_code], dim=-1), target
+
+    def __len__(self):
+        return self.targets.numel()
