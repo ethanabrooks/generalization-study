@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from rl_utils import hierarchical_parse_args
 from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 from torchvision import transforms
 from tqdm import tqdm
 
@@ -211,7 +211,32 @@ def main(
 
     simple = bool(simple_dataset_size)
     if simple:
-        dataset = SimpleDataset(n=simple_dataset_size, generalization_error=alpha)
+        splits = Datasets(
+            train=simple_dataset_size * 3 // 7,
+            test=simple_dataset_size * 3 // 7,
+            valid=None,
+        )
+        splits = splits._replace(valid=simple_dataset_size - splits.train - splits.test)
+        classifier_datasets = Datasets(
+            train=Subset(
+                AddLabel(
+                    SimpleDataset(n=simple_dataset_size, generalization_error=0.5), 0
+                ),
+                list(range(splits.train)),
+            ),
+            test=Subset(
+                AddLabel(
+                    SimpleDataset(n=simple_dataset_size, generalization_error=0), 1
+                ),
+                list(range(splits.train, splits.train + splits.test)),
+            ),
+            valid=Subset(
+                AddLabel(
+                    SimpleDataset(n=simple_dataset_size, generalization_error=0), 2
+                ),
+                list(range(splits.train + splits.test, simple_dataset_size)),
+            ),
+        )
     else:
         train_dataset = NoiseDataset(
             "../data",
@@ -231,15 +256,15 @@ def main(
             percent_noise=alpha,
         )
         dataset = train_dataset + test_dataset
-    size = len(dataset)
-    splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=None)
-    splits = splits._replace(valid=size - splits.train - splits.test)
-    classifier_datasets = Datasets(
-        *[
-            AddLabel(dataset, label, random_labels=random_labels)
-            for label, dataset in enumerate(random_split(dataset, splits))
-        ]
-    )
+        size = len(dataset)
+        splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=None)
+        splits = splits._replace(valid=size - splits.train - splits.test)
+        classifier_datasets = Datasets(
+            *[
+                AddLabel(dataset, label, random_labels=random_labels)
+                for label, dataset in enumerate(random_split(dataset, splits))
+            ]
+        )
     if simple:
         print("train")
         for i in range(len(classifier_datasets.train)):
