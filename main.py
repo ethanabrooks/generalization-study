@@ -364,7 +364,6 @@ def cli():
     parser.add_argument(
         "--discriminator-epochs",
         type=int,
-        default=20,
         metavar="N",
         help="number of epochs to train (default: 10)",
     )
