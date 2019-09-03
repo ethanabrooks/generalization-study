@@ -207,7 +207,12 @@ def main(
         device = "cpu"
     kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True} if use_cuda else {}
 
-    if simple_dataset_size is None:
+    simple = bool(simple_dataset_size)
+    if simple:
+        dataset = SimpleDataset(n=simple_dataset_size, generalization_error=alpha)
+        half = simple_dataset_size // 2
+        train_dataset, test_dataset = random_split(dataset, [half, half])
+    else:
         train_dataset = NoiseDataset(
             "../data",
             train=True,
@@ -225,10 +230,6 @@ def main(
             ),
             percent_noise=alpha,
         )
-    else:
-        dataset = SimpleDataset(n=simple_dataset_size, generalization_error=alpha)
-        half = simple_dataset_size // 2
-        train_dataset, test_dataset = random_split(dataset, [half, half])
     size = len(train_dataset) + len(test_dataset)
     splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=size * 1 // 7)
     classifier_datasets = Datasets(
@@ -310,6 +311,10 @@ def main(
                     for k, v in counter.items():
                         if k != "batch":
                             writer.add_scalar(k, v, batch_count["classifier"])
+            if simple:
+                print("classifier weights")
+                for p in classifier.parameters():
+                    print(p)
             for k, v in test_discriminator(
                 classifier=classifier,
                 discriminator=discriminator,
@@ -338,6 +343,10 @@ def main(
                     for k, v in counter.items():
                         if k != "batch":
                             writer.add_scalar(k, v, batch_count["discriminator"])
+            if simple:
+                print("discriminator weights")
+                for p in discriminator.parameters():
+                    print(p)
             torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
 
 
