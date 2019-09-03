@@ -339,9 +339,9 @@ def main(
         ).items():
             writer.add_scalar(k, v, i)
         iterator = (
-            tqdm(range(1, discriminator_epochs + 1), desc="discriminator")
-            if discriminator_epochs
-            else itertools.count()
+            itertools.count()
+            if discriminator_epochs is None
+            else tqdm(range(1, discriminator_epochs + 1), desc="discriminator")
         )
         for epoch in iterator:
             for j, counter in enumerate(
