@@ -347,7 +347,10 @@ def main(
                 print("discriminator weights")
                 for p in discriminator.parameters():
                     print(p)
-            torch.save(classifier.state_dict(), str(Path(log_dir, "mnist_cnn.pt")))
+            torch.save(classifier.state_dict(), str(Path(log_dir, "classifier.pt")))
+            torch.save(
+                discriminator.state_dict(), str(Path(log_dir, "discriminator.pt"))
+            )
 
 
 def cli():
