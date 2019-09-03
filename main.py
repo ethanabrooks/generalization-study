@@ -195,8 +195,9 @@ def main(
     aux_coef,
     simple_dataset_size,
 ):
+    torch.manual_seed(seed)
     use_cuda = not no_cuda and torch.cuda.is_available()
-    torch.manual_seed(1)
+    torch.manual_seed(seed)
     if use_cuda:
         n_gpu = get_n_gpu()
         try:
@@ -211,8 +212,6 @@ def main(
     simple = bool(simple_dataset_size)
     if simple:
         dataset = SimpleDataset(n=simple_dataset_size, generalization_error=alpha)
-        half = simple_dataset_size // 2
-        train_dataset, test_dataset = random_split(dataset, [half, half])
     else:
         train_dataset = NoiseDataset(
             "../data",
@@ -231,16 +230,23 @@ def main(
             ),
             percent_noise=alpha,
         )
-    size = len(train_dataset) + len(test_dataset)
-    splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=size * 1 // 7)
+        dataset = train_dataset + test_dataset
+    size = len(dataset)
+    splits = Datasets(train=size * 3 // 7, test=size * 3 // 7, valid=None)
+    splits = splits._replace(valid=size - splits.train - splits.test)
     classifier_datasets = Datasets(
         *[
             AddLabel(dataset, label, random_labels=random_labels)
-            for label, dataset in enumerate(
-                random_split(train_dataset + test_dataset, splits)
-            )
+            for label, dataset in enumerate(random_split(dataset, splits))
         ]
     )
+    if simple:
+        print("train")
+        for i in range(len(classifier_datasets.train)):
+            print(classifier_datasets.train[i])
+        print("test")
+        for i in range(len(classifier_datasets.test)):
+            print(classifier_datasets.test[i])
     classifier_loaders = Datasets(
         *[
             DataLoader(dataset, batch_size=batch_size, **kwargs)
@@ -285,6 +291,10 @@ def main(
             classifier=classifier, device=device, test_loader=classifier_loaders.train
         ).items():
             writer.add_scalar("sanity_check" + k, v, 0)
+        for k, v in test(
+            classifier=classifier, device=device, test_loader=classifier_loaders.test
+        ).items():
+            pass
     if discriminator_load_path:
         classifier.load_state_dict(torch.load(discriminator_load_path))
         # sanity check to make sure that discriminator was properly loaded
@@ -295,7 +305,6 @@ def main(
             test_loader=discriminator_loaders.train,
         ).items():
             writer.add_scalar("sanity_check" + k, v, 0)
-    torch.manual_seed(seed)
     iterations = range(num_iterations) if num_iterations else itertools.count()
     batch_count = Counter()
 
