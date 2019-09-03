@@ -187,6 +187,7 @@ def main(
     discriminator_epochs,
     discriminator_args,
     classifier_load_path,
+    discriminator_load_path,
     log_dir,
     log_interval,
     run_id,
@@ -283,74 +284,78 @@ def main(
         for k, v in test(
             classifier=classifier, device=device, test_loader=classifier_loaders.train
         ).items():
-            writer.add_scalar(k, v, 0)
-        torch.manual_seed(seed)
-    else:
-        torch.manual_seed(seed)
-        iterations = range(num_iterations) if num_iterations else itertools.count()
-        batch_count = Counter()
+            writer.add_scalar("sanity_check" + k, v, 0)
+    if discriminator_load_path:
+        classifier.load_state_dict(torch.load(discriminator_load_path))
+        # sanity check to make sure that discriminator was properly loaded
+        for k, v in test_discriminator(
+            classifier=classifier,
+            discriminator=discriminator,
+            device=device,
+            test_loader=discriminator_loaders.train,
+        ).items():
+            writer.add_scalar("sanity_check" + k, v, 0)
+    torch.manual_seed(seed)
+    iterations = range(num_iterations) if num_iterations else itertools.count()
+    batch_count = Counter()
 
-        for i in iterations:
-            for k, v in test(
-                classifier=classifier,
-                device=device,
-                test_loader=classifier_loaders.valid,
-            ).items():
-                writer.add_scalar(k, v, i)
-            for epoch in tqdm(range(1, classifier_epochs + 1), desc="classifier"):
-                for counter in train(
-                    classifier=classifier,
-                    discriminator=discriminator,
-                    aux_coef=aux_coef if i > 0 else 0,
-                    device=device,
-                    train_loader=classifier_loaders.train,
-                    optimizer=classifier_optimizer,
-                    log_interval=log_interval,
-                ):
-                    batch_count.update(classifier=counter["batch"])
-                    for k, v in counter.items():
-                        if k != "batch":
-                            writer.add_scalar(k, v, batch_count["classifier"])
-            if simple:
-                print("classifier weights")
-                for p in classifier.parameters():
-                    print(p)
-            for k, v in test_discriminator(
+    for i in iterations:
+        for k, v in test(
+            classifier=classifier, device=device, test_loader=classifier_loaders.valid
+        ).items():
+            writer.add_scalar(k, v, i)
+        for epoch in tqdm(range(1, classifier_epochs + 1), desc="classifier"):
+            for counter in train(
                 classifier=classifier,
                 discriminator=discriminator,
+                aux_coef=aux_coef if i > 0 else 0,
                 device=device,
-                test_loader=discriminator_loaders.test,
-            ).items():
-                writer.add_scalar(k, v, i)
-            iterator = (
-                tqdm(range(1, discriminator_epochs + 1), desc="discriminator")
-                if discriminator_epochs
-                else itertools.count()
-            )
-            for epoch in iterator:
-                for j, counter in enumerate(
-                    train_discriminator(
-                        classifier=classifier,
-                        discriminator=discriminator,
-                        device=device,
-                        train_loader=discriminator_loaders.train,
-                        optimizer=discriminator_optimizer,
-                        log_interval=log_interval,
-                        use_pbar=discriminator_epochs is None,
-                    )
-                ):
-                    batch_count.update(discriminator=counter["batch"])
-                    for k, v in counter.items():
-                        if k != "batch":
-                            writer.add_scalar(k, v, batch_count["discriminator"])
-            if simple:
-                print("discriminator weights")
-                for p in discriminator.parameters():
-                    print(p)
-            torch.save(classifier.state_dict(), str(Path(log_dir, "classifier.pt")))
-            torch.save(
-                discriminator.state_dict(), str(Path(log_dir, "discriminator.pt"))
-            )
+                train_loader=classifier_loaders.train,
+                optimizer=classifier_optimizer,
+                log_interval=log_interval,
+            ):
+                batch_count.update(classifier=counter["batch"])
+                for k, v in counter.items():
+                    if k != "batch":
+                        writer.add_scalar(k, v, batch_count["classifier"])
+        if simple:
+            print("classifier weights")
+            for p in classifier.parameters():
+                print(p)
+        for k, v in test_discriminator(
+            classifier=classifier,
+            discriminator=discriminator,
+            device=device,
+            test_loader=discriminator_loaders.test,
+        ).items():
+            writer.add_scalar(k, v, i)
+        iterator = (
+            tqdm(range(1, discriminator_epochs + 1), desc="discriminator")
+            if discriminator_epochs
+            else itertools.count()
+        )
+        for epoch in iterator:
+            for j, counter in enumerate(
+                train_discriminator(
+                    classifier=classifier,
+                    discriminator=discriminator,
+                    device=device,
+                    train_loader=discriminator_loaders.train,
+                    optimizer=discriminator_optimizer,
+                    log_interval=log_interval,
+                    use_pbar=discriminator_epochs is None,
+                )
+            ):
+                batch_count.update(discriminator=counter["batch"])
+                for k, v in counter.items():
+                    if k != "batch":
+                        writer.add_scalar(k, v, batch_count["discriminator"])
+        if simple:
+            print("discriminator weights")
+            for p in discriminator.parameters():
+                print(p)
+        torch.save(classifier.state_dict(), str(Path(log_dir, "classifier.pt")))
+        torch.save(discriminator.state_dict(), str(Path(log_dir, "discriminator.pt")))
 
 
 def cli():
@@ -437,6 +442,7 @@ def cli():
     parser.add_argument("--log-dir", default="/tmp/mnist", metavar="N")
     parser.add_argument("--run-id", metavar="N", default="")
     parser.add_argument("--classifier-load-path")
+    parser.add_argument("--discriminator-load-path")
     main(**hierarchical_parse_args(parser))
 
 
