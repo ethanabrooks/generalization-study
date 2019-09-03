@@ -220,7 +220,7 @@ def main(
         classifier_datasets = Datasets(
             train=Subset(
                 AddLabel(
-                    SimpleDataset(n=simple_dataset_size, generalization_error=0.5), 0
+                    SimpleDataset(n=simple_dataset_size, generalization_error=alpha), 0
                 ),
                 list(range(splits.train)),
             ),
